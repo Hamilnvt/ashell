@@ -1,18 +1,9 @@
 /* TODO
     Comandi da implementare:
-    - move (mv, ma sposta solamente il file, non lo rinomina)
-    - rename (come mv, ma sicuro)
-      > dump file (stampa il contenuto del file sul terminale)
-      > dump file > (come sopra)
-      > dump file > out (come sopra)
-      > dump file1 > file2 (sovrascrive file2 con il contenuto di file1) (sarebbe cp, potrei fare degli alias)
-      > dump file1 >> file2 (appende il contenuto di file1 a file2)      (sarebbe cat, potrei fare degli alias)
-    - grep
+    - grep (devo solo fare un parser per le regexp 👍🏼)
 
     Urgent stack:
     - usa ovunque errno
-    - documentare la sintassi dell'usage <.>, [.], <...>, etc.
-    - free buffer quando si fanno le getline
 
     Altre cose da fare:
     - inserire la linea del codice (__LINE__) in shlog DEBUG e TODO
@@ -91,7 +82,10 @@ typedef enum
 
 static char shlog_buffer[1024];
 
-void shlog(Shlog_Levels lvl, char *format, ...); // Forward declaration
+// Forward declarations ////////////////////////// 
+void shlog(Shlog_Levels lvl, char *format, ...);
+//////////////////////////////////////////////////
+
 void shlog_NO_NEWLINE(Shlog_Levels lvl, char *format, ...)
 {
     va_list msg_fmt; 
@@ -443,10 +437,12 @@ bool is_dir(char *dir_path)
     int stat_res = stat(dir_path, &st);
     if (stat_res != 0) {
         shlog(SHLOG_ERROR, "Directory `%s` does not exist.", dir_path);
+        errno = 0;
         return false;
     }
     if ((st.st_mode & S_IFMT) != S_IFDIR) {
         shlog(SHLOG_ERROR, "`%s` is not a directory", dir_path);
+        errno = 0;
         return false;
     }
     return true;
@@ -454,32 +450,32 @@ bool is_dir(char *dir_path)
 
 // Usage, flags and doc ///////////////////////////
 static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive usage for all commands");
-#define USAGE_DOC         "doc [command] [...flags]"
-#define USAGE_ECHO        "echo <...args>"
-#define USAGE_LS          "ls [path] [...flags]"
-#define USAGE_CD          "cd <dir>"
+#define USAGE_DOC         "doc [COMMAND] [...FLAGS]"
+#define USAGE_ECHO        "echo <...ARGS>"
+#define USAGE_LS          "ls [PATH | .] [...FLAGS]"
+#define USAGE_CD          "cd <DIR>"
 #define USAGE_PWD         "pwd"
-#define USAGE_MKDIR       "mkdir <dir_path>"
-#define USAGE_RM          "rm <file_path>"
-#define USAGE_CLEAR       "c(lear)"
-#define USAGE_QUIT        "q(uit)"
-#define USAGE_SIZE        "size [path]"
-#define USAGE_MKFL        "mkfl <file_path>"
-#define USAGE_SHED        "shed [file_path]"
-#define USAGE_FILE_WRITE  "> <file>"
-#define USAGE_FILE_APPEND ">> <file>"
-#define USAGE_DUMP        "dump <src> [[operator | >] [...dst]]"
-#define USAGE_MOVE        "move <old_path> <new_path>"
-#define USAGE_RENAME      "rename <path/to/old/name> <new_name>"
+#define USAGE_MKDIR       "mkdir <DIR_PATH>"
+#define USAGE_RM          "rm <FILE_PATH>"
+#define USAGE_CLEAR       "clear (c)"
+#define USAGE_QUIT        "quit (q)"
+#define USAGE_SIZE        "size (sz) [PATH | .]"
+#define USAGE_MKFL        "mkfl <FILE_PATH>"
+#define USAGE_SHED        "shed (ed) [FILE_PATH | ./NEW]"
+#define USAGE_FILE_WRITE  "> <FILE> [INPUT | stdin]"
+#define USAGE_FILE_APPEND ">> <FILE> [INPUT | stdin]"
+#define USAGE_DUMP        "dump (dp) <SRC> [[OPERATOR | >] [...DST]]"
+#define USAGE_MOVE        "move (mv) <OLD_PATH> <NEW_PATH>"
+#define USAGE_RENAME      "rename (rn) <PATH/TO/OLD/NAME> <NEW_NAME>"
 
 #define NO_FLAGS "No flags for this command."
 static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive flags for all commands");
-#define FLAGS_DOC         ("-d\t\tPrint (d)ocumentation for the shell\n"\
-                           "-c\t\tPrint list of available (c)ommands\n"\
-                           "<command> -d\tPrint (d)oc info for <command>\n"\
-                           "<command> -u\tPrint (u)sage info for <command>\n"\
-                           "<command> -f\tPrint (f)lags info for <command>\n")
-#define FLAGS_LS          "-h\tShow (h)idden files"
+#define FLAGS_DOC         ("-d\t\tPrint Documentation for the shell\n"\
+                           "-c\t\tPrint list of available Commands\n"\
+                           "<COMMAND> -d\tPrint Doc info for COMMAND\n"\
+                           "<COMMAND> -u\tPrint Usage info for COMMAND\n"\
+                           "<COMMAND> -f\tPrint Flags info for COMMAND\n")
+#define FLAGS_LS          "-h\tShow Hidden files"
 #define FLAGS_CD          NO_FLAGS
 #define FLAGS_PWD         NO_FLAGS
 #define FLAGS_MKDIR       NO_FLAGS
@@ -497,27 +493,35 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive flags for all commands");
 #define FLAGS_RENAME      NO_FLAGS
 
 static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive doc string for all commands");
-#define DOC_DOC         "Print the documentation for [command]. If none print the documentation of the shell and the documentation for all the commands."
-#define DOC_LS          "List [path] content. If none list current directory content."
-#define DOC_CD          "Change the working directory to <dir>."
+#define DOC_DOC         "Print the documentation for COMMAND. If none print the documentation of the shell and the documentation for all the commands."
+#define DOC_LS          "List PATH content. If none list current directory content."
+#define DOC_CD          "Change the working directory to DIR."
 #define DOC_PWD         "Print working directory."
-#define DOC_MKDIR       "Create the directory at <dir_path>."
-#define DOC_RM          "Remove the file located at <file_path>."
-#define DOC_ECHO        "Print <...args> on the terminal."
+#define DOC_MKDIR       "Create the directory at DIR_PATH."
+#define DOC_RM          "Remove the file located at FILE_PATH."
+#define DOC_ECHO        "Print ARGS on the terminal."
 #define DOC_CLEAR       "Clear the screen of the terminal."
 #define DOC_QUIT        "Exit the shell safely."
-#define DOC_SIZE        "Print the size of [path]. If none, print the size of the current directory."
-#define DOC_MKFL        "Create the file at <file_path>."
-#define DOC_SHED        "Open [file_path] with the builtin `shed` text editor. If none open an empty unsaved file"
-#define DOC_FILE_WRITE  "Overwrite <file> with input (stdin)."
-#define DOC_FILE_APPEND "Append input (stdin) to <file>."
-#define DOC_DUMP        "Dump <file>: TODO..."
-#define DOC_MOVE        "Move the file or directory (maybe with a flag? TODO) in <old_path> to <new_path>.\n"\
-                        "Does not override names. Use `rename` command if you want to do so."
-#define DOC_RENAME      "Rename the file at <path/to/old/name> to <new_name>."
+#define DOC_SIZE        "Print the size of PATH. If none, print the size of the current directory."
+#define DOC_MKFL        "Create the file at FILE_PATH."
+#define DOC_SHED        "Open FILE_PATH with the builtin `shed` text editor. If none open NEW, an empty unsaved file, in the working directory"
+#define DOC_FILE_WRITE  "Write INPUT (default is stdin) to FILE. FILE will be overwritten."
+#define DOC_FILE_APPEND "Append INPUT (default is stdin) to FILE."
+#define DOC_DUMP        "Dump FILE: TODO..."
+#define DOC_MOVE        "Move the file or directory in OLD_PATH to NEW_PATH. Does not change names, if you want to do so use `rename`."
+#define DOC_RENAME      "Rename the file at PATH/TO/OLD/NAME to NEW_NAME."
 
 static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive documentation");
 #define DOC ("DOCUMENTATION\n \n"\
+             "Syntax:\n "\
+             "    Command usage uses the following syntax:\n"\
+             "    - some\t\tsome is a simple name, can be anything and is often the name of the command at the beginning of the usage.\n"\
+             "    - (some)\t\tis an alternative, often shorter, version of a command. e.g. clear (c) means `clear` and `c` will execute the same command.\n"\
+             "    - <some>\t\tsome in <> is mandatory.\n"\
+             "    - [some | default]\t\tsome in [] is optional, if not specified it will take the default value.\n"\
+             "    - ...some\t\tsome is a list (e.g. [...args] is an optional list of arguments)\n"\
+             "    - -some\t\tsome is a flag (see `Flags` section).\n"\
+             " \n"\
              "Commands:\n "\
              "    Commands have a name, a series of arguments and a series of flags: name [...args] [...flags]\n"\
              "    - Command with no arguments:   name\n"\
@@ -526,10 +530,10 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive documentation");
              " \n"\
              "Flags:\n "\
              "    Flags ought to go after the arguments of the command.\n"\
-             "    - Flags with no arguments:    -flag\n"\
-             "    - Flags with one argument:    -flag=arg\n"\
-             "    - Flags with more arguments:  -flag=arg1,arg2\n"\
-             "    - Flags with args with flags: -flag=[arg1 -f1,arg2 -f2]"\
+             "    - Flags with no arguments:        -flag\n"\
+             "    - Flags with one argument:        -flag=arg\n"\
+             "    - Flags with more arguments:      -flag=arg1,arg2\n"\
+             "    - Flags arguments can have flags: -flag=[arg1 -f1,arg2 -f2]"\
      )
 
 static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive commands list");
@@ -888,7 +892,6 @@ int exec_shed(Command *cmd)
 }
 
 // TODO
-// - per poter scrivere la stringa `eof` basta scrivere `\eof`
 // - per cambiare l'fd da cui leggere / su cui scrivere basta cambiare stdin in getline e f in fprintf (quindi conviene usare i fd)
 #define SHEOF "eof"
 int exec_file_write(Command *cmd)
@@ -918,7 +921,10 @@ int exec_file_write(Command *cmd)
     if (len > 0) buffer[len-1] = '\0';
     while(read > 0 && !streq(buffer, SHEOF)) {
         if (DEBUG) shlog(SHLOG_DEBUG, "`%s`", buffer);
-        fprintf(f, "%s\n", buffer);
+        if (streq(buffer, "\\eof")) fprintf(f, "eof\n");
+        else fprintf(f, "%s\n", buffer);
+        free(buffer);
+        buffer = NULL;
         read = getline(&buffer, &_, stdin);
         len = strlen(buffer);
         if (len > 0) buffer[len-1] = '\0';
@@ -926,12 +932,19 @@ int exec_file_write(Command *cmd)
     if (read <= 0) {
         shlog(SHLOG_ERROR, "Read error");
         shlog(SHLOG_TODO, "Come lo gestisco?");
+        free(buffer);
         return 1;
     } 
+    free(buffer);
     fclose(f);
     return 0;
 }
 
+// - dump file (stampa il contenuto del file sul terminale)
+// - dump file > (come sopra)
+// - dump file > out (come sopra)
+// - dump file1 > file2 (sovrascrive file2 con il contenuto di file1) (sarebbe cp, potrei fare degli alias)
+// - dump file1 >> file2 (appende il contenuto di file1 a file2)      (sarebbe cat, potrei fare degli alias)
 int exec_dump(Command *cmd)
 {
     if (cmd->argc == 0) {
@@ -940,6 +953,10 @@ int exec_dump(Command *cmd)
         return 1;
     }
     char *file_name = cmd->argv.items[0];
+    if (is_dir(file_name)) {
+        shlog(SHLOG_ERROR, "Cannot dump `%s`, it's a directory.", file_name);
+        return 1;
+    }
     FILE *fin = fopen(file_name, "r");
     if (fin == NULL) {
         shlog(SHLOG_ERROR, "Could not open file `%s`. %s.", file_name, strerror(errno));
@@ -953,8 +970,11 @@ int exec_dump(Command *cmd)
     if (cmd->argc == 1) {
         while(read > 0) {
             printf(buffer);
+            free(buffer);
+            buffer = NULL;
             read = getline(&buffer, &_size, fin);
         }
+        if (buffer != NULL) free(buffer);
         if (read == -1 && errno) {
             shlog(SHLOG_ERROR, strerror(errno));
             fclose(fin);
@@ -977,9 +997,8 @@ int exec_dump(Command *cmd)
     return 0;
 }
 
-// TODO
-// x controllo che il primo file esista
-// x controllo che il secondo path esista e sia una directory
+// - controllo che il primo file esista
+// - controllo che il secondo path esista e sia una directory
 // - controllo che nel secondo path non esista un file con lo stesso nome del primo
 // - eseguo rename con i due path
 int exec_move(Command *cmd)
@@ -1026,11 +1045,11 @@ int exec_move(Command *cmd)
     return 0;
 }
 
-// x estraggo il path del primo nome
-// x controllo che il file esista
-// x controllo che il secondo nome non presenti '/'
-// x controllo che nel path non esista un'altro file/dir con lo stesso nome (conto il numero dei file con lo stesso nome)
-// x eseguo rename con gli stessi path
+// - estraggo il path del primo nome
+// - controllo che il file esista
+// - controllo che il secondo nome non presenti '/'
+// - controllo che nel path non esista un'altro file/dir con lo stesso nome (conto il numero dei file con lo stesso nome)
+// - eseguo rename con gli stessi path
 int exec_rename(Command *cmd)
 {
     if (cmd->argc < 2) {
@@ -1121,6 +1140,8 @@ int main(void)
         int word_count = count_words(line);
         aos_init(&words, word_count);
         tokenize_string(line, &words);
+        free(line);
+        line = NULL;
         Command command;
         isCommandValid = words_to_command(words, &command);
         aos_free(&words);
