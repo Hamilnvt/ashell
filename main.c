@@ -1,20 +1,22 @@
 /* TODO
     Comandi da implementare:
     - grep (devo solo fare un parser per le regexp 👍🏼)
+    - get and set env variables
 
     Urgent stack:
-    - usa ovunque errno
+    - supporto per ~ ovunque
 
     Altre cose da fare:
-    - inserire la linea del codice (__LINE__) in shlog DEBUG e TODO
+    - usare ctrl+D per terminare la lettura da stdin
     - creare una cartella trash in cui vanno le cose eliminate con rm
     - permissions (mostrarle in ls, anche con colori diversi dei file; se si vuole eseguire un'operazione per cui non si hanno i permessi bisogna segnalarlo all'utente)
     - ed text editor https://www.gnu.org/software/ed/manual/ed_manual.html
     - previous and next command
-      > probabilmente devo tenere un buffer che poi verra' ridirezionato (solitamente verso stdin)
-    - config file che permette di modificare i colori e chissa' cos'altro
+    > probabilmente devo tenere un buffer che poi verra' ridirezionato (solitamente verso stdin)
+    - config file che permette di modificare i colori, il path del trash e chissa' cos'altro
     - correction if a similar command is found
     - autocompletion by tabbing (chissa' se e' possible)
+    - capire come usare alt+key e ctrl+key
 */
 
 #include <stdio.h>
@@ -31,18 +33,12 @@
 #include <stdarg.h>
 #include <errno.h>
 
-#define ROOT_DIR "/home/mathieu/" // TODO: hard coded (metti una variabile root)
-
 // TEXT COLORS and STYLES //////////////////////////////////////// 
 #define COLOR_FG_BEGIN "\x1B[38;2;" // foreground plain style
 #define COLOR_BG_BEGIN "\x1B[48;2;" // background plain style
 #define COLOR_END "\x1B[0m"
 
 #define WHITE "255;255;255"
-#define BLACK "0;0;0"
-#define RED "255;0;0"
-#define GREEN "0;255;0"
-#define BLUE "0;0;255"
 
 #define PROMPT_COLOR     "120;120;120"
 #define DIRECTORY_COLOR  "50;150;255"
@@ -78,15 +74,15 @@ typedef enum
     SHLOG_WARNING,
     SHLOG_ERROR,
     SHLOG_FATAL
-} Shlog_Levels;
+} ShlogLevel;
 
 static char shlog_buffer[1024];
 
 // Forward declarations ////////////////////////// 
-void shlog(Shlog_Levels lvl, char *format, ...);
+void shlog(ShlogLevel lvl, char *format, ...);
 //////////////////////////////////////////////////
 
-void shlog_NO_NEWLINE(Shlog_Levels lvl, char *format, ...)
+void shlog_NO_NEWLINE(ShlogLevel lvl, char *format, ...)
 {
     va_list msg_fmt; 
     va_start(msg_fmt, format);
@@ -110,7 +106,7 @@ void shlog_NO_NEWLINE(Shlog_Levels lvl, char *format, ...)
         shlog(lvl, shlog_buffer);
     } else printf("%s", shlog_buffer);
 }
-void shlog(Shlog_Levels lvl, char *format, ...)
+void shlog(ShlogLevel lvl, char *format, ...)
 {
     va_list msg_fmt; 
     va_start(msg_fmt, format);
@@ -130,6 +126,11 @@ void shlog(Shlog_Levels lvl, char *format, ...)
     }
 }
 
+void shlog_error_and_reset_errno()
+{
+    shlog(SHLOG_ERROR, strerror(errno));
+    errno = 0;
+}
 void shlog_just_use_doc_for_args(char *cmd_name) { shlog(SHLOG_INFO, "`doc %s -u` to know more about `%s` usage", cmd_name, cmd_name); }
 void shlog_just_use_doc_for_flags(char *cmd_name) { shlog(SHLOG_INFO, "`doc %s -f` to know more about `%s` flags", cmd_name, cmd_name); }
 void shlog_unknown_flag(char *flag, char *cmd_name)
@@ -168,8 +169,6 @@ void shlog_too_few_arguments(char *cmd_name)
 }
 //////////////////////////////////////////////////
 
-#define PROMPT "-> "
-
 #define DEBUG false
 typedef enum
 {
@@ -182,9 +181,24 @@ typedef enum
 // GLOBAL VARIABLES ////////////////////////
 EXIT_CODE exit_code;
 int signalno;
-char working_directory[512];
+char working_dir[512];
+char root_dir[512];
 //char output[1024]; // TODO: da pensare
 ///////////////////////////////////////////
+
+bool streq(char *s1, char *s2) { return (strcmp(s1, s2) == 0); }
+
+#define PROMPT "=> "
+void print_prompt()
+{
+    char prompt_buf[1024];
+    if (strncmp(working_dir, root_dir, strlen(root_dir)) == 0) {
+        sprintf(prompt_buf, "~%s %s", working_dir+strlen(root_dir), PROMPT);
+    } else {
+        sprintf(prompt_buf, "%s %s", working_dir, PROMPT);
+    }
+    print_fg_text(prompt_buf, PROMPT_COLOR);
+}
 
 void sigint_handler(int signo) {
     signalno = signo;
@@ -196,8 +210,10 @@ void Start()
 {
     exit_code = EXIT_NOT_SET;
     signalno = 0;
-    getcwd(working_directory, sizeof(working_directory));
-    if (DEBUG) shlog(SHLOG_DEBUG, "Working in %s", working_directory);
+    getcwd(working_dir, sizeof(working_dir));
+    sprintf(root_dir, getenv("HOME"));
+    if (DEBUG) shlog(SHLOG_DEBUG, "Working in %s", working_dir);
+    if (DEBUG) shlog(SHLOG_DEBUG, "Root: %s", root_dir);
 
     struct sigaction sigint_action = { .sa_handler = sigint_handler };
     sigaction(SIGINT, &sigint_action, NULL);
@@ -353,30 +369,28 @@ void cmd_print(Command cmd)
     shlog(SHLOG_DEBUG, "}");
 }
 
-bool streq(char *s1, char *s2) { return (strcmp(s1, s2) == 0); }
-
-CmdType getCmdType(char *cmd_name)
+CmdType getCmdType(char *name)
 {
     static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive parsed command types in getCmdType");
-    if      (streq(cmd_name, "doc"))                           return CMD_DOC;
-    if      (streq(cmd_name, "echo"))                          return CMD_ECHO;
-    else if (streq(cmd_name, "quit")  || streq(cmd_name, "q")) return CMD_QUIT;
-    else if (streq(cmd_name, "ls"))                            return CMD_LS;
-    else if (streq(cmd_name, "sl"))                            return CMD_SL;
-    else if (streq(cmd_name, "cd"))                            return CMD_CD;
-    else if (streq(cmd_name, "pwd"))                           return CMD_PWD;
-    else if (streq(cmd_name, "mkdir"))                         return CMD_MKDIR;
-    else if (streq(cmd_name, "rm"))                            return CMD_RM;
-    else if (streq(cmd_name, "clear") || streq(cmd_name, "c")) return CMD_CLEAR;
-    else if (streq(cmd_name, "size"))                          return CMD_SIZE;
-    else if (streq(cmd_name, "mkfl"))                          return CMD_MKFL;
-    else if (streq(cmd_name, "shed"))                          return CMD_SHED;
-    else if (streq(cmd_name, ">"))                             return CMD_FILE_WRITE;
-    else if (streq(cmd_name, ">>"))                            return CMD_FILE_APPEND;
-    else if (streq(cmd_name, "dump"))                          return CMD_DUMP;
-    else if (streq(cmd_name, "move"))                          return CMD_MOVE; // oppure mv? TODO
-    else if (streq(cmd_name, "rename"))                        return CMD_RENAME;
-    else                                                       return CMD_UNKNOWN;
+    if      (streq(name, "doc"))                         return CMD_DOC;
+    if      (streq(name, "echo"))                        return CMD_ECHO;
+    else if (streq(name, "quit")  || streq(name, "q"))   return CMD_QUIT;
+    else if (streq(name, "ls"))                          return CMD_LS;
+    else if (streq(name, "sl"))                          return CMD_SL;
+    else if (streq(name, "cd"))                          return CMD_CD;
+    else if (streq(name, "pwd"))                         return CMD_PWD;
+    else if (streq(name, "mkdir"))                       return CMD_MKDIR;
+    else if (streq(name, "rm"))                          return CMD_RM;
+    else if (streq(name, "clear") || streq(name, "c"))   return CMD_CLEAR;
+    else if (streq(name, "size") || streq(name, "sz"))   return CMD_SIZE;
+    else if (streq(name, "mkfl"))                        return CMD_MKFL;
+    else if (streq(name, "shed") || streq(name, "ed"))   return CMD_SHED;
+    else if (streq(name, ">"))                           return CMD_FILE_WRITE;
+    else if (streq(name, ">>"))                          return CMD_FILE_APPEND;
+    else if (streq(name, "dump") || streq(name, "dp"))   return CMD_DUMP;
+    else if (streq(name, "move") || streq(name, "mv"))   return CMD_MOVE;
+    else if (streq(name, "rename") || streq(name, "rn")) return CMD_RENAME;
+    else                                                 return CMD_UNKNOWN;
 }
 
 bool words_to_command(ArrayOfStrings words, Command *cmd)
@@ -431,18 +445,17 @@ bool words_to_command(ArrayOfStrings words, Command *cmd)
     return true;
 }
 
+// TODO non deve stampare gli errori, ma solo ritornare il bool
 bool is_dir(char *dir_path)
 {
     struct stat st;
     int stat_res = stat(dir_path, &st);
     if (stat_res != 0) {
-        shlog(SHLOG_ERROR, "Directory `%s` does not exist.", dir_path);
-        errno = 0;
+        shlog_error_and_reset_errno();
         return false;
     }
     if ((st.st_mode & S_IFMT) != S_IFDIR) {
         shlog(SHLOG_ERROR, "`%s` is not a directory", dir_path);
-        errno = 0;
         return false;
     }
     return true;
@@ -662,7 +675,7 @@ int exec_echo(Command *cmd)
     return 0;
 }
 
-int exec_pwd() { printf("%s\n", working_directory); return 0; }
+int exec_pwd() { printf("%s\n", working_dir); return 0; }
 
 int exec_quit() { exit_code = EXIT_OK; return 0; }
 
@@ -671,7 +684,6 @@ int exec_clear() { printf("\e[1;1H\e[2J"); return 0; }
 int exec_sl() { printf("Non annusarmi l'ashell.\n"); return 0; }
 
 // TODO:
-// - support for ~ (= /home/mathieu/ -> devo ottenere il nome dell'utente, dovrebbe essere facile)
 // - ls su cartella vuota stampa un avviso
 // - flag per la ricerca
 // - Cose da stampare (che forse diventeranno flags):
@@ -680,9 +692,24 @@ int exec_sl() { printf("Non annusarmi l'ashell.\n"); return 0; }
 //   > permessi dei file?
 int exec_ls(Command *cmd)
 {
+    if (cmd->argc > 1) {
+        shlog_too_many_arguments(cmd->name);
+        return 1;
+    }
+
     bool ls_flag_show_hidden_files = false;
 
-    char *path = (cmd->argc == 0 || streq(cmd->argv.items[0], ".")) ? working_directory : cmd->argv.items[0]; //TODO: da sistemare
+    char path[1024];
+    if (cmd->argc == 0) sprintf(path, working_dir);
+    else {
+        char *path_arg = cmd->argv.items[0];
+        if (streq(path_arg, ".") || streq(path_arg, "./")) sprintf(path, working_dir);
+        else if (path_arg[0] == '~') sprintf(path, "%s/%s", root_dir, path_arg+1);
+        else sprintf(path, path_arg);
+    }
+
+    shlog(SHLOG_DEBUG, path);
+
     for (int i = 0; i < cmd->flagc; i++) {
         char *flag = cmd->flagv.items[i];
         if (streq(flag, "-h")) ls_flag_show_hidden_files = true;
@@ -699,7 +726,7 @@ int exec_ls(Command *cmd)
         shlog(SHLOG_ERROR, "Could not open directory `%s`", path);
         return 1;
     }
-    char file_path[1024];
+    char file_path[2048];
     char *color = WHITE;
     struct stat st;
     int stat_res;
@@ -723,6 +750,8 @@ int exec_ls(Command *cmd)
                         default:  color = WHITE;            break;
                     }
                 }
+            } else {
+                shlog_error_and_reset_errno();
             }
             printn_fg_text(dire->d_name, color);
         }
@@ -738,12 +767,20 @@ int exec_cd(Command *cmd)
         shlog_too_many_arguments(cmd->name);
         return 1;
     }
-    char *new_directory = cmd->argc == 0 ? ROOT_DIR : cmd->argv.items[0];
-    if (DEBUG) shlog(SHLOG_DEBUG, "Current working directory: %s", working_directory);
-    if (!is_dir(new_directory)) return 1;
-    chdir(new_directory);
-    getcwd(working_directory, sizeof(working_directory));
-    if (DEBUG) shlog(SHLOG_DEBUG, "New working directory: %s", working_directory);
+
+    char new_dir[1024];
+    if (cmd->argc == 0) sprintf(new_dir, root_dir);
+    else {
+        char *new_dir_arg = cmd->argv.items[0];
+        if (new_dir_arg[0] == '~') sprintf(new_dir, "%s/%s", root_dir, new_dir_arg+1);
+        else sprintf(new_dir, new_dir_arg);
+    }
+
+    if (DEBUG) shlog(SHLOG_DEBUG, "Current working directory: %s", working_dir);
+    if (!is_dir(new_dir)) return 1;
+    chdir(new_dir);
+    getcwd(working_dir, sizeof(working_dir));
+    if (DEBUG) shlog(SHLOG_DEBUG, "New working directory: %s", working_dir);
     return 0;
 }
 
@@ -840,7 +877,7 @@ int exec_size(Command *cmd)
         shlog_no_flags_for_this_command(cmd->name);
         return 1;
     }
-    char *file_path = cmd->argc == 0 ? working_directory : cmd->argv.items[0];
+    char *file_path = cmd->argc == 0 ? working_dir : cmd->argv.items[0];
     size_t size = 0;
     bool ok = calculate_file_size(file_path, &size);
     if (!ok) {
@@ -959,8 +996,7 @@ int exec_dump(Command *cmd)
     }
     FILE *fin = fopen(file_name, "r");
     if (fin == NULL) {
-        shlog(SHLOG_ERROR, "Could not open file `%s`. %s.", file_name, strerror(errno));
-        errno = 0;
+        shlog_error_and_reset_errno();
         return 1;
     }
 
@@ -976,7 +1012,7 @@ int exec_dump(Command *cmd)
         }
         if (buffer != NULL) free(buffer);
         if (read == -1 && errno) {
-            shlog(SHLOG_ERROR, strerror(errno));
+            shlog_error_and_reset_errno();
             fclose(fin);
             return 1;
         }
@@ -1119,9 +1155,7 @@ int main(void)
     Command command = {0};
     while (exit_code == EXIT_NOT_SET)
     {
-        char prompt_buf[1024];
-        sprintf(prompt_buf, "%s/ %s", working_directory, PROMPT);
-        print_fg_text(prompt_buf, PROMPT_COLOR);
+        print_prompt();
         read = getline(&line, &line_len, stdin);
         if (read <= 0) {
             if (signalno != 0) {
