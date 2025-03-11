@@ -5,6 +5,7 @@
 
     Urgent stack:
     - supporto per ~ ovunque
+    - coda dei errno, oppure ogni controllo stampa gia' l'errore e non devo preoccuparmene, pero' devo decidere
 
     Altre cose da fare:
     - usare ctrl+D per terminare la lettura da stdin
@@ -126,9 +127,13 @@ void shlog(ShlogLevel lvl, char *format, ...)
     }
 }
 
-void shlog_error_and_reset_errno()
+void shlog_error_and_reset_errno(char *arg)
 {
-    shlog(SHLOG_ERROR, strerror(errno));
+    if (arg != NULL) {
+        shlog(SHLOG_ERROR, "%s: %s", arg, strerror(errno));
+    } else {
+        shlog(SHLOG_ERROR, "%s", arg, strerror(errno));
+    }
     errno = 0;
 }
 void shlog_just_use_doc_for_args(char *cmd_name) { shlog(SHLOG_INFO, "`doc %s -u` to know more about `%s` usage", cmd_name, cmd_name); }
@@ -167,6 +172,8 @@ void shlog_too_few_arguments(char *cmd_name)
     shlog(SHLOG_ERROR, "Too few arguments for `%s`", cmd_name);
     shlog_just_use_doc_for_args(cmd_name);
 }
+void shlog_not_a_dir(char *path) { shlog(SHLOG_ERROR, "`%s` is not a directory", path); }
+void shlog_file_does_not_exist(char *file_name) { shlog(SHLOG_ERROR, "`%s` does not exist", file_name); }
 //////////////////////////////////////////////////
 
 #define DEBUG false
@@ -445,20 +452,19 @@ bool words_to_command(ArrayOfStrings words, Command *cmd)
     return true;
 }
 
-// TODO non deve stampare gli errori, ma solo ritornare il bool
-bool is_dir(char *dir_path)
+bool does_file_exist(char *path)
 {
     struct stat st;
-    int stat_res = stat(dir_path, &st);
-    if (stat_res != 0) {
-        shlog_error_and_reset_errno();
-        return false;
-    }
-    if ((st.st_mode & S_IFMT) != S_IFDIR) {
-        shlog(SHLOG_ERROR, "`%s` is not a directory", dir_path);
-        return false;
-    }
-    return true;
+    return stat(path, &st) == 0;
+}
+
+bool is_dir(char *dir_path)
+{
+    if (!does_file_exist(dir_path)) return false;
+
+    struct stat st;
+    stat(dir_path, &st);
+    return ((st.st_mode & S_IFMT) == S_IFDIR);
 }
 
 // Usage, flags and doc ///////////////////////////
@@ -684,7 +690,6 @@ int exec_clear() { printf("\e[1;1H\e[2J"); return 0; }
 int exec_sl() { printf("Non annusarmi l'ashell.\n"); return 0; }
 
 // TODO:
-// - ls su cartella vuota stampa un avviso
 // - flag per la ricerca
 // - Cose da stampare (che forse diventeranno flags):
 //   > dimensiona totale della cartella
@@ -697,8 +702,6 @@ int exec_ls(Command *cmd)
         return 1;
     }
 
-    bool ls_flag_show_hidden_files = false;
-
     char path[1024];
     if (cmd->argc == 0) sprintf(path, working_dir);
     else {
@@ -708,7 +711,7 @@ int exec_ls(Command *cmd)
         else sprintf(path, path_arg);
     }
 
-    shlog(SHLOG_DEBUG, path);
+    bool ls_flag_show_hidden_files = false;
 
     for (int i = 0; i < cmd->flagc; i++) {
         char *flag = cmd->flagv.items[i];
@@ -718,7 +721,11 @@ int exec_ls(Command *cmd)
             return 1;
         }
     }
-    if (!is_dir(path)) return 1;
+    if (!is_dir(path)) {
+        shlog_not_a_dir(path);
+        return 1;
+    }
+
     DIR *d;
     struct dirent *dire;
     d = opendir(path);
@@ -727,6 +734,7 @@ int exec_ls(Command *cmd)
         return 1;
     }
     char file_path[2048];
+    size_t file_count = 0;
     char *color = WHITE;
     struct stat st;
     int stat_res;
@@ -751,11 +759,14 @@ int exec_ls(Command *cmd)
                     }
                 }
             } else {
-                shlog_error_and_reset_errno();
+                shlog_error_and_reset_errno(NULL);
             }
             printn_fg_text(dire->d_name, color);
         }
+        file_count++;
     }
+    if (file_count == 0) shlog(SHLOG_INFO, "Empty directory `%s`", path);
+    else shlog(SHLOG_INFO, "Count: %d", file_count);
 
     closedir(d);
     return 0;
@@ -777,7 +788,10 @@ int exec_cd(Command *cmd)
     }
 
     if (DEBUG) shlog(SHLOG_DEBUG, "Current working directory: %s", working_dir);
-    if (!is_dir(new_dir)) return 1;
+    if (!is_dir(new_dir)) {
+        shlog_not_a_dir(new_dir);
+        return 1;
+    }
     chdir(new_dir);
     getcwd(working_dir, sizeof(working_dir));
     if (DEBUG) shlog(SHLOG_DEBUG, "New working directory: %s", working_dir);
@@ -821,8 +835,7 @@ int exec_rm(Command *cmd)
             if (is_dir(cmd->argv.items[i])) {
                 if (rm_flag_recursive) shlog(SHLOG_WARNING, "flag -r is not yet implemented.");
                 else shlog(SHLOG_ERROR, "Could not remove not empty directory `%s`. Consider using recursive flag -r.", cmd->argv.items[i]);
-            }
-            else shlog(SHLOG_ERROR, "Could not remove file `%s`.", cmd->argv.items[i]);
+            } else shlog(SHLOG_ERROR, "Could not remove file `%s`.", cmd->argv.items[i]);
             err = 1;
         }
     }
@@ -988,48 +1001,83 @@ int exec_dump(Command *cmd)
         shlog(SHLOG_ERROR, "No file provided");
         shlog_just_use_doc_for_args(cmd->name);
         return 1;
-    }
-    char *file_name = cmd->argv.items[0];
-    if (is_dir(file_name)) {
-        shlog(SHLOG_ERROR, "Cannot dump `%s`, it's a directory.", file_name);
-        return 1;
-    }
-    FILE *fin = fopen(file_name, "r");
-    if (fin == NULL) {
-        shlog_error_and_reset_errno();
+    } else if (cmd->argc > 3) {
+        shlog_too_many_arguments(cmd->name);
         return 1;
     }
 
-    char *buffer = NULL;
-    size_t _size = 0;
-    ssize_t read = getline(&buffer, &_size, fin);
+    char *fin_name = cmd->argv.items[0];
+    if (!does_file_exist(fin_name)) {
+        shlog_file_does_not_exist(fin_name);
+        return 1;
+    }
+    if (is_dir(fin_name)) {
+        shlog(SHLOG_ERROR, "Cannot dump `%s`, it's a directory.", fin_name);
+        return 1;
+    }
+    FILE *fin = fopen(fin_name, "r");
+    if (fin == NULL) {
+        shlog_error_and_reset_errno(NULL);
+        return 1;
+    }
+    if (DEBUG) shlog(SHLOG_DEBUG, "Dump input: %s", fin_name);
+
+    FILE *fout = NULL;
+    char *options = NULL;
     if (cmd->argc == 1) {
-        while(read > 0) {
-            printf(buffer);
-            free(buffer);
-            buffer = NULL;
-            read = getline(&buffer, &_size, fin);
-        }
-        if (buffer != NULL) free(buffer);
-        if (read == -1 && errno) {
-            shlog_error_and_reset_errno();
-            fclose(fin);
-            return 1;
-        }
+        fout = stdin;
+        if (DEBUG) shlog(SHLOG_DEBUG, "Dump output: stdin");
     } else {
         char *operator = cmd->argv.items[1];
         if (DEBUG) shlog(SHLOG_DEBUG, "Operator: %s", operator);
         if (streq(operator, ">")) {
-            shlog(SHLOG_TODO, "dump file write: Not implemented yet");
+            options = "wb";
         } else if (streq(operator, ">>")) {
-            shlog(SHLOG_TODO, "dump file append: Not implemented yet");
+            options = "ab";
         } else {
             shlog(SHLOG_ERROR, "Unknown operator `%s` for command `%s`", operator, cmd->name);
             shlog_just_use_doc_for_args(cmd->name);
             return 1;
         }
+
+        char *fout_name = cmd->argv.items[2];
+        if (!does_file_exist(fout_name)) {
+            shlog_file_does_not_exist(fout_name);
+            return 1;
+        }
+        if (is_dir(fout_name)) {
+            shlog(SHLOG_ERROR, "Cannot dump into `%s`, it's a directory.", fout_name);
+            return 1;
+        }
+        fout = fopen(fout_name, options);
+        if (fout == NULL) {
+            shlog_error_and_reset_errno(NULL);
+            return 1;
+        }
+        if (DEBUG) shlog(SHLOG_DEBUG, "Dump output: %s", fout_name);
     }
+    if (DEBUG) shlog(SHLOG_DEBUG, "Dump options: %s", options == NULL ? "none" : options);
+
+    const int BUF_CAP = 1024;
+    char buffer[1024] = {0};
+    char *line;
+    int i = 0;
+    if (DEBUG) shlog(SHLOG_DEBUG, "Input file to read from: %p", fin);
+    while((line = fgets(buffer, BUF_CAP, fin)) != NULL) {
+        if (fout == stdin) printf(line);
+        else fprintf(fout, line);
+        i++;
+    }
+    if (!feof(fin)) {
+        shlog(SHLOG_ERROR, strerror(ferror(fin)));
+        fclose(fin);
+        if (fout != stdin && fout != NULL) fclose(fout); 
+        return 1;
+    }
+    shlog(SHLOG_INFO, "End of file reached: wrote %d lines", i);
+
     fclose(fin);
+    if (fout != stdin && fout != NULL) fclose(fout);
     return 0;
 }
 
@@ -1076,7 +1124,6 @@ int exec_move(Command *cmd)
     }
     char new_path_complete[1024];
     sprintf(new_path_complete, "%s/%s", new_path, old_name);
-    shlog(SHLOG_DEBUG, "Moving `%s` to `%s`", old_path, new_path_complete);
     rename(old_path, new_path_complete);
     return 0;
 }
@@ -1158,6 +1205,7 @@ int main(void)
         print_prompt();
         read = getline(&line, &line_len, stdin);
         if (read <= 0) {
+            shlog(SHLOG_DEBUG, "What's the matter? %s", strerror(errno));
             if (signalno != 0) {
                 exit_code = EXIT_SIGNAL;
             } else {
