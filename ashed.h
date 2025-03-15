@@ -1,16 +1,6 @@
 #ifndef ASHED_H_
 #define ASHED_H_
 
-#include <stdio.h>
-#include <string.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <ctype.h>
-#include <math.h>
-#include <errno.h>
-#include <assert.h>
-#include <sys/stat.h>
-
 #include "ashell_utils.h"
 
 #define EDDEBUG 0

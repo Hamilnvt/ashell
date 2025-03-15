@@ -21,182 +21,14 @@
     - capire come usare alt+key e ctrl+key
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-#include <assert.h>
 #include <unistd.h>
-#include <signal.h>
 #include <sys/wait.h>
-#include <sys/stat.h>
 #include <dirent.h>
-#include <fcntl.h>
-#include <stdarg.h>
-#include <errno.h>
 
 #include "ashed.h"
 
-// TEXT COLORS and STYLES //////////////////////////////////////// 
-#define COLOR_FG_BEGIN "\x1B[38;2;" // foreground plain style
-#define COLOR_BG_BEGIN "\x1B[48;2;" // background plain style
-#define COLOR_END "\x1B[0m"
-
-#define WHITE "255;255;255"
-
-#define PROMPT_COLOR     "120;120;120"
-#define DIRECTORY_COLOR  "50;150;255"
-#define EXECUTABLE_COLOR "50;255;50"
-
-// Shlog colors
-#define SHLOG_INFO_COLOR    "50;180;0"
-#define SHLOG_DOC_COLOR     "180;180;0" 
-#define SHLOG_USAGE_COLOR   "180;180;180"
-#define SHLOG_FLAGS_COLOR   "50;180;180"
-#define SHLOG_TODO_COLOR    "30;100;255"
-#define SHLOG_DEBUG_COLOR   SHLOG_DOC_COLOR
-#define SHLOG_WARNING_COLOR "180;100;0"
-#define SHLOG_ERROR_COLOR   "180;30;30"
-#define SHLOG_FATAL_COLOR   "200;50;200"
-
-void print_fg_text(char *text, char *fg) { printf("%s%sm%s%s", COLOR_FG_BEGIN, fg, text, COLOR_END); }
-void print_bg_text(char *text, char *bg) { printf("%s%sm%s%s", COLOR_BG_BEGIN, bg, text, COLOR_END); }
-void print_color_text(char *text, char *fg, char *bg) { printf("%s%sm%s%sm%s%s", COLOR_BG_BEGIN, bg, COLOR_FG_BEGIN, fg, text, COLOR_END); }
-
-void printn_fg_text(char *text, char *fg) { printf("%s%sm%s%s\n", COLOR_FG_BEGIN, fg, text, COLOR_END); }
-void printn_bg_text(char *text, char *bg) { printf("%s%sm%s%s\n", COLOR_BG_BEGIN, bg, text, COLOR_END); }
-void printn_color_text(char *text, char *fg, char *bg) { printf("%s%sm%s%sm%s%s\n", COLOR_BG_BEGIN, bg, COLOR_FG_BEGIN, fg, text, COLOR_END); }
-
-typedef enum
-{
-    SHLOG_INFO,
-    SHLOG_DOC,
-    SHLOG_USAGE,
-    SHLOG_FLAGS,
-    SHLOG_TODO,
-    SHLOG_DEBUG,
-    SHLOG_WARNING,
-    SHLOG_ERROR,
-    SHLOG_FATAL
-} ShlogLevel;
-
-static char shlog_buffer[1024];
-
-// Forward declarations ////////////////////////// 
-void shlog(ShlogLevel lvl, char *format, ...);
-//////////////////////////////////////////////////
-
-void shlog_NO_NEWLINE(ShlogLevel lvl, char *format, ...)
-{
-    va_list msg_fmt; 
-    va_start(msg_fmt, format);
-    vsprintf(shlog_buffer, format, msg_fmt);
-    va_end(msg_fmt);
-
-    switch(lvl) {
-        case SHLOG_INFO:    print_fg_text("[INFO] ",    SHLOG_INFO_COLOR);    break; 
-        case SHLOG_DOC:     print_fg_text("[DOC] ",     SHLOG_DOC_COLOR);     break; 
-        case SHLOG_USAGE:   print_fg_text("[USAGE] ",   SHLOG_USAGE_COLOR);   break; 
-        case SHLOG_FLAGS:   print_fg_text("[FLAGS] ",   SHLOG_FLAGS_COLOR);   break; 
-        case SHLOG_TODO:    print_fg_text("[TODO] ",    SHLOG_TODO_COLOR);    break; 
-        case SHLOG_DEBUG:   print_fg_text("[DEBUG] ",   SHLOG_DEBUG_COLOR);   break; 
-        case SHLOG_WARNING: print_fg_text("[WARNING] ", SHLOG_WARNING_COLOR); break; 
-        case SHLOG_ERROR:   print_fg_text("[ERROR] ",   SHLOG_ERROR_COLOR);   break; 
-        case SHLOG_FATAL:   print_fg_text("[FATAL] ",   SHLOG_FATAL_COLOR);   break; 
-        default:            assert("Unreachable" && 0);
-    }
-
-    if (strchr(shlog_buffer, '\n')) {
-        shlog(lvl, shlog_buffer);
-    } else printf("%s", shlog_buffer);
-}
-void shlog(ShlogLevel lvl, char *format, ...)
-{
-    va_list msg_fmt; 
-    va_start(msg_fmt, format);
-    vsprintf(shlog_buffer, format, msg_fmt);
-    va_end(msg_fmt);
-    if (strchr(shlog_buffer, '\n')) {
-        char *line = strtok(shlog_buffer, "\n");
-        shlog(lvl, line);
-        line = strtok(NULL, "\n");
-        while (line) {
-            shlog(lvl, line);
-            line = strtok(NULL, "\n");
-        }
-    } else {
-        shlog_NO_NEWLINE(lvl, shlog_buffer);
-        printf("\n");
-    }
-}
-
-void shlog_error_and_reset_errno(char *arg)
-{
-    if (arg != NULL) {
-        shlog(SHLOG_ERROR, "%s: %s", arg, strerror(errno));
-    } else {
-        shlog(SHLOG_ERROR, "%s", arg, strerror(errno));
-    }
-    errno = 0;
-}
-void shlog_just_use_doc_for_args(char *cmd_name) { shlog(SHLOG_INFO, "`doc %s -u` to know more about `%s` usage", cmd_name, cmd_name); }
-void shlog_just_use_doc_for_flags(char *cmd_name) { shlog(SHLOG_INFO, "`doc %s -f` to know more about `%s` flags", cmd_name, cmd_name); }
-void shlog_unknown_flag(char *flag, char *cmd_name)
-{
-    shlog(SHLOG_ERROR, "Unknown flag `%s` for command `%s`", flag, cmd_name);
-    shlog_just_use_doc_for_flags(cmd_name);
-}
-void shlog_unknown_flag_for_single_arg(char *flag, char *cmd_name)
-{
-    shlog(SHLOG_ERROR, "Unknown flag `%s` for command `%s <arg>`", flag, cmd_name);
-    shlog_just_use_doc_for_flags(cmd_name);
-}
-void shlog_unknown_flag_for_multiple_args(char *flag, char *cmd_name)
-{
-    shlog(SHLOG_ERROR, "Unknown flag `%s` for command `%s <...args>`", flag, cmd_name);
-    shlog_just_use_doc_for_flags(cmd_name);
-}
-void shlog_unknown_command(char *cmd_name) {
-    shlog(SHLOG_ERROR, "Unknown command `%s`", cmd_name);
-    shlog(SHLOG_INFO, "`doc -c` for a comprehensive list of commands");
-}
-void shlog_no_flags_for_this_command(char *cmd_name)
-{
-    shlog(SHLOG_ERROR, "`%s` does not support flags", cmd_name);
-    shlog_just_use_doc_for_flags(cmd_name);
-}
-void shlog_too_many_arguments(char *cmd_name)
-{
-    shlog(SHLOG_ERROR, "Too many arguments for `%s`", cmd_name);
-    shlog_just_use_doc_for_args(cmd_name);
-}
-void shlog_too_few_arguments(char *cmd_name)
-{
-    shlog(SHLOG_ERROR, "Too few arguments for `%s`", cmd_name);
-    shlog_just_use_doc_for_args(cmd_name);
-}
-void shlog_not_a_dir(char *path) { shlog(SHLOG_ERROR, "`%s` is not a directory", path); }
-void shlog_file_does_not_exist(char *file_name) { shlog(SHLOG_ERROR, "`%s` does not exist", file_name); }
-//////////////////////////////////////////////////
-
-/// Checking macros  //////////////////// 
-#define CHECK_TOO_MANY_ARGUMENTS(cmd, max) \
-    do { \
-        if ((cmd)->argc > (max)) { \
-            shlog_too_many_arguments((cmd)->name); \
-            return 1; \
-        } \
-    } while (0)
-#define CHECK_TOO_FEW_ARGUMENTS(cmd, min) \
-    do { \
-        if ((cmd)->argc < (min)) { \
-            shlog_too_few_arguments((cmd)->name); \
-            return 1; \
-        } \
-    } while (0)
-/////////////////////////////////////////
-
 #define SHDEBUG false
+
 typedef enum
 {
     EXIT_NOT_SET,
@@ -231,6 +63,20 @@ void sigint_handler(int signo) {
     shlog(SHLOG_WARNING, "Shell has been interrupted");
 }
 
+void test_shlog_levels()
+{
+    char *test_str = "prova";
+    shlog(SHLOG_INFO, test_str);
+    shlog(SHLOG_DOC, test_str);
+    shlog(SHLOG_USAGE, test_str);
+    shlog(SHLOG_FLAGS, test_str);
+    shlog(SHLOG_TODO, test_str);
+    shlog(SHLOG_DEBUG, test_str);
+    shlog(SHLOG_WARNING, test_str);
+    shlog(SHLOG_ERROR, test_str);
+    shlog(SHLOG_FATAL, test_str);
+}
+
 void Start()
 {
     exit_code = EXIT_NOT_SET;
@@ -240,39 +86,10 @@ void Start()
     if (SHDEBUG) shlog(SHLOG_DEBUG, "Working in %s", working_dir);
     if (SHDEBUG) shlog(SHLOG_DEBUG, "Root: %s", root_dir);
 
+    test_shlog_levels();
+
     struct sigaction sigint_action = { .sa_handler = sigint_handler };
     sigaction(SIGINT, &sigint_action, NULL);
-}
-
-typedef struct
-{
-    char **items;
-    int count;
-} ArrayOfStrings;
-
-void aos_print(ArrayOfStrings aos)
-{
-    shlog(SHLOG_DEBUG, "Printing ArrayOfStrings (len = %d):", aos.count);
-    for (int i = 0; i < aos.count; i++) {
-        shlog(SHLOG_DEBUG, "%d: %s", i, aos.items[i]);
-    }
-}
-
-void aos_init(ArrayOfStrings *aos, unsigned int size)
-{
-    if (size == 0) {
-        shlog(SHLOG_FATAL, "Cannot allocate memory of size <= 0");
-        abort();
-    }
-    aos->items = malloc(size*sizeof(char *));
-    aos->count = size;
-}
-
-void aos_free(ArrayOfStrings *aos)
-{
-    for (int i = 0; i < aos->count; i++)
-        free(aos->items[i]);
-    free(aos->items);
 }
 
 typedef enum
@@ -301,54 +118,6 @@ typedef enum
 static_assert(CMD_UNKNOWN==0 && CMD_DOC==1 && CMD_ECHO==2 && CMD_LS==3 && CMD_CD==4 && CMD_PWD==5 && CMD_MKDIR==6 && CMD_RM==7 && CMD_QUIT==8 && CMD_CLEAR==9 && CMD_SL==10 &&
               CMD_SIZE==11 && CMD_MKFL==12 && CMD_ASHED==13 && CMD_FILE_WRITE == 14 && CMD_FILE_APPEND == 15 && CMD_DUMP==16 && CMD_MOVE==17 && CMD_RENAME==18 && CMDTYPES_COUNT==19, "Order of commands is preserved"); 
 
-int count_words(char *input)
-{
-    if (SHDEBUG) shlog(SHLOG_DEBUG, "Count words in `%s`", input);
-    int count = 0;
-    bool in_word = true;
-    while (*input == ' ') input++;
-    if (*input != '\0') count = 1;
-    while (*input != '\0') {
-        if (in_word) {
-            while(*input != ' ' && *input != '\0') input++;
-            in_word = false;
-        } else {
-            while(*input == ' ' && *input != '\0') input++;
-            if (*input != '\0') {
-                in_word = true;
-                count++;
-            }
-        }
-    }
-    return count;
-}
-
-// Words has already allocated enough memory for all the words.
-void tokenize_string(char *input, ArrayOfStrings *words)
-{
-    char *tmp = input;
-    char word[256];
-    if (SHDEBUG) shlog(SHLOG_DEBUG, "Tokeninzing string: `%s`", input);
-    int index = 0;
-    while (*tmp != '\0') {
-        while (*tmp == ' ') tmp++;
-        if (*tmp == '\0') break;
-
-        int len = 0;
-        char *begin_word = tmp;
-        while (*tmp != ' ' && *tmp != '\0') {
-            len++;
-            tmp++;
-        } 
-        if (len > 0) {
-            sprintf(word, "%.*s", len+1, begin_word);
-            word[len] = '\0';
-            words->items[index] = strdup(word);
-            index++;
-        }
-    }
-}
-
 typedef struct
 {
     CmdType type;
@@ -358,7 +127,6 @@ typedef struct
     int flagc;
     ArrayOfStrings flagv;
 } Command;
-
 
 void cmd_free(Command *cmd)
 {
@@ -650,13 +418,6 @@ int exec_doc(Command *cmd)
             }
         }
     }
-
-    //shlog(SHLOG_DEBUG, "doc:   %d", DOC_FLAG_DOC); 
-    //shlog(SHLOG_DEBUG, "cmds:  %d", DOC_FLAG_CMDS); 
-    //shlog(SHLOG_DEBUG, "usage: %d", DOC_FLAG_USAGE); 
-    //shlog(SHLOG_DEBUG, "flags: %d", DOC_FLAG_FLAGS); 
-    //shlog(SHLOG_DEBUG, "all:   %d", DOC_FLAG_ALL); 
-    //shlog(SHLOG_DEBUG, "Input: %d", doc_flags);
 
     if (cmd->argc == 0) {
         if (doc_flags & DOC_FLAG_DOC)  shlog(SHLOG_DOC, DOC);
