@@ -5,7 +5,8 @@
 
     Urgent stack:
     - supporto per ~ ovunque
-    - coda dei errno, oppure ogni controllo stampa gia' l'errore e non devo preoccuparmene, pero' devo decidere
+    - ? coda dei errno, oppure ogni controllo stampa gia' l'errore e non devo preoccuparmene, pero' devo decidere
+    - perche' sto usando un puntatore a cmd? forse per risparmiare sulle operazioni?
 
     Altre cose da fare:
     - usare ctrl+D per terminare la lettura da stdin
@@ -14,7 +15,7 @@
     - ed text editor https://www.gnu.org/software/ed/manual/ed_manual.html
     - previous and next command
     > probabilmente devo tenere un buffer che poi verra' ridirezionato (solitamente verso stdin)
-    - config file che permette di modificare i colori, il path del trash e chissa' cos'altro
+    - config file che permette di modificare i colori, il path del trash, cose di ed e chissa' cos'altro
     - correction if a similar command is found
     - autocompletion by tabbing (chissa' se e' possible)
     - capire come usare alt+key e ctrl+key
@@ -175,6 +176,23 @@ void shlog_too_few_arguments(char *cmd_name)
 void shlog_not_a_dir(char *path) { shlog(SHLOG_ERROR, "`%s` is not a directory", path); }
 void shlog_file_does_not_exist(char *file_name) { shlog(SHLOG_ERROR, "`%s` does not exist", file_name); }
 //////////////////////////////////////////////////
+
+/// Checking macros  //////////////////// 
+#define CHECK_TOO_MANY_ARGUMENTS(cmd, max) \
+    do { \
+        if ((cmd)->argc > (max)) { \
+            shlog_too_many_arguments((cmd)->name); \
+            return 1; \
+        } \
+    } while (0)
+#define CHECK_TOO_FEW_ARGUMENTS(cmd, min) \
+    do { \
+        if ((cmd)->argc < (min)) { \
+            shlog_too_few_arguments((cmd)->name); \
+            return 1; \
+        } \
+    } while (0)
+/////////////////////////////////////////
 
 #define DEBUG false
 typedef enum
@@ -625,6 +643,8 @@ DocStrings doc_strings[CMDTYPES_COUNT+1] = {
 
 int exec_doc(Command *cmd)
 {
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
+
     int doc_flags = cmd->flagc == 0 ? DOC_FLAG_ALL : 0;
 
     for (int i = 0; i < cmd->flagc; i++) {
@@ -657,7 +677,7 @@ int exec_doc(Command *cmd)
         if (doc_flags & DOC_FLAG_DOC)  shlog(SHLOG_DOC, DOC);
         if (doc_flags & (~DOC_FLAG_DOC & ~DOC_FLAG_CMDS)) shlog(SHLOG_DOC, " \n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
         if (doc_flags & DOC_FLAG_CMDS) shlog(SHLOG_DOC, CMDS_LIST);
-    } else if (cmd->argc == 1) {
+    } else {
         char *cmd_to_doc_name = cmd->argv.items[0];
         CmdType type = getCmdType(cmd_to_doc_name);
         if      (type == CMD_UNKNOWN) shlog_unknown_command(cmd_to_doc_name);
@@ -670,7 +690,7 @@ int exec_doc(Command *cmd)
             if (doc_flags & DOC_FLAG_USAGE) shlog(SHLOG_USAGE, doc_strings[type].usage);   
             if (doc_flags & DOC_FLAG_FLAGS) shlog(SHLOG_FLAGS, doc_strings[type].flags);   
         }
-    } else shlog_too_many_arguments(cmd->name);
+    }
     return 0;
 }
 
@@ -697,10 +717,7 @@ int exec_sl() { printf("Non annusarmi l'ashell.\n"); return 0; }
 //   > permessi dei file?
 int exec_ls(Command *cmd)
 {
-    if (cmd->argc > 1) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    }
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
 
     char path[1024];
     if (cmd->argc == 0) sprintf(path, working_dir);
@@ -774,10 +791,7 @@ int exec_ls(Command *cmd)
 
 int exec_cd(Command *cmd)
 {
-    if (cmd->argc > 1) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    }
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
 
     char new_dir[1024];
     if (cmd->argc == 0) sprintf(new_dir, root_dir);
@@ -883,10 +897,9 @@ bool calculate_file_size(char *file_path, size_t *size)
 char *size_units[] = {"", "k", "M", "G"};
 int exec_size(Command *cmd)
 {
-    if (cmd->argc > 1) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    } else if (cmd->flagc > 0) {
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
+
+    if (cmd->flagc > 0) {
         shlog_no_flags_for_this_command(cmd->name);
         return 1;
     }
@@ -912,10 +925,7 @@ int exec_mkfl(Command *cmd)
         shlog(SHLOG_ERROR, "No path to file provided");
         return 1;
     }
-    if (cmd->argc > 1) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    }
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
 
     char *file_path = cmd->argv.items[0];
     FILE *f = fopen(file_path, "a");
@@ -930,11 +940,7 @@ int exec_mkfl(Command *cmd)
 
 int exec_shed(Command *cmd)
 {
-    (void)cmd;
-    if (cmd->argc > 1) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    }
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
     if (cmd->argc == 0) shlog(SHLOG_DEBUG, "Opening empty file");
     else shlog(SHLOG_DEBUG, "Opening file `%s`", cmd->argv.items[0]);
     shlog(SHLOG_TODO, "Not implemented yet");
@@ -946,17 +952,16 @@ int exec_shed(Command *cmd)
 #define SHEOF "eof"
 int exec_file_write(Command *cmd)
 {
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
+
     if (cmd->argc == 0) {
         shlog(SHLOG_ERROR, "No file name provided");
         shlog_just_use_doc_for_args(cmd->name);
         return 1;
-    } else if (cmd->argc > 1) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
     }
+
     char *file_name = cmd->argv.items[0];
-    struct stat s;
-    if (stat(file_name, &s) != 0) {
+    if (!does_file_exist(file_name)) {
         shlog(SHLOG_INFO, "Creating file `%s`", file_name);
     }
     FILE *f = cmd->type == CMD_FILE_WRITE ? fopen(file_name, "w") : fopen(file_name, "a");
@@ -995,14 +1000,14 @@ int exec_file_write(Command *cmd)
 // - dump file > out (come sopra)
 // - dump file1 > file2 (sovrascrive file2 con il contenuto di file1) (sarebbe cp, potrei fare degli alias)
 // - dump file1 >> file2 (appende il contenuto di file1 a file2)      (sarebbe cat, potrei fare degli alias)
+// > se file2 non esiste viene creato -> TODO: chiedere se crearlo oppure no
 int exec_dump(Command *cmd)
 {
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 3);
+
     if (cmd->argc == 0) {
         shlog(SHLOG_ERROR, "No file provided");
         shlog_just_use_doc_for_args(cmd->name);
-        return 1;
-    } else if (cmd->argc > 3) {
-        shlog_too_many_arguments(cmd->name);
         return 1;
     }
 
@@ -1042,8 +1047,7 @@ int exec_dump(Command *cmd)
 
         char *fout_name = cmd->argv.items[2];
         if (!does_file_exist(fout_name)) {
-            shlog_file_does_not_exist(fout_name);
-            return 1;
+            shlog(SHLOG_INFO, "Creating file `%s`", fout_name);
         }
         if (is_dir(fout_name)) {
             shlog(SHLOG_ERROR, "Cannot dump into `%s`, it's a directory.", fout_name);
@@ -1087,13 +1091,9 @@ int exec_dump(Command *cmd)
 // - eseguo rename con i due path
 int exec_move(Command *cmd)
 {
-    if (cmd->argc < 2) {
-        shlog_too_few_arguments(cmd->name);
-        return 1;
-    } else if (cmd->argc > 2) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    }
+    CHECK_TOO_FEW_ARGUMENTS(cmd, 2);
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 2);
+
     char *old_path = cmd->argv.items[0];
     struct stat st;
     if (stat(old_path, &st) != 0) {
@@ -1135,13 +1135,8 @@ int exec_move(Command *cmd)
 // - eseguo rename con gli stessi path
 int exec_rename(Command *cmd)
 {
-    if (cmd->argc < 2) {
-        shlog_too_few_arguments(cmd->name);
-        return 1;
-    } else if (cmd->argc > 2) {
-        shlog_too_many_arguments(cmd->name);
-        return 1;
-    }
+    CHECK_TOO_FEW_ARGUMENTS(cmd, 2);
+    CHECK_TOO_MANY_ARGUMENTS(cmd, 2);
 
     char *old_name = cmd->argv.items[0];
     struct stat st;
@@ -1205,7 +1200,7 @@ int main(void)
         print_prompt();
         read = getline(&line, &line_len, stdin);
         if (read <= 0) {
-            shlog(SHLOG_DEBUG, "What's the matter? %s", strerror(errno));
+            if (DEBUG) shlog(SHLOG_DEBUG, "What's the matter? %s", strerror(errno));
             if (signalno != 0) {
                 exit_code = EXIT_SIGNAL;
             } else {

@@ -3,7 +3,6 @@ ashell
 colors
 colors.c
 ed
-ed.c
 main
 shell_del_prof
 shell_del_prof.c
