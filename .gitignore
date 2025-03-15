@@ -2,6 +2,7 @@ prova/
 ashell
 colors
 colors.c
+ed.c
 ed
 main
 shell_del_prof

@@ -35,6 +35,8 @@
 #include <stdarg.h>
 #include <errno.h>
 
+#include "ashed.h"
+
 // TEXT COLORS and STYLES //////////////////////////////////////// 
 #define COLOR_FG_BEGIN "\x1B[38;2;" // foreground plain style
 #define COLOR_BG_BEGIN "\x1B[48;2;" // background plain style
@@ -194,7 +196,7 @@ void shlog_file_does_not_exist(char *file_name) { shlog(SHLOG_ERROR, "`%s` does 
     } while (0)
 /////////////////////////////////////////
 
-#define DEBUG false
+#define SHDEBUG false
 typedef enum
 {
     EXIT_NOT_SET,
@@ -210,8 +212,6 @@ char working_dir[512];
 char root_dir[512];
 //char output[1024]; // TODO: da pensare
 ///////////////////////////////////////////
-
-bool streq(char *s1, char *s2) { return (strcmp(s1, s2) == 0); }
 
 #define PROMPT "=> "
 void print_prompt()
@@ -237,8 +237,8 @@ void Start()
     signalno = 0;
     getcwd(working_dir, sizeof(working_dir));
     sprintf(root_dir, getenv("HOME"));
-    if (DEBUG) shlog(SHLOG_DEBUG, "Working in %s", working_dir);
-    if (DEBUG) shlog(SHLOG_DEBUG, "Root: %s", root_dir);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Working in %s", working_dir);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Root: %s", root_dir);
 
     struct sigaction sigint_action = { .sa_handler = sigint_handler };
     sigaction(SIGINT, &sigint_action, NULL);
@@ -290,7 +290,7 @@ typedef enum
     CMD_SL,
     CMD_SIZE,
     CMD_MKFL,
-    CMD_SHED,
+    CMD_ASHED,
     CMD_FILE_WRITE,
     CMD_FILE_APPEND,
     CMD_DUMP,
@@ -299,11 +299,11 @@ typedef enum
     CMDTYPES_COUNT 
 } CmdType;
 static_assert(CMD_UNKNOWN==0 && CMD_DOC==1 && CMD_ECHO==2 && CMD_LS==3 && CMD_CD==4 && CMD_PWD==5 && CMD_MKDIR==6 && CMD_RM==7 && CMD_QUIT==8 && CMD_CLEAR==9 && CMD_SL==10 &&
-              CMD_SIZE==11 && CMD_MKFL==12 && CMD_SHED==13 && CMD_FILE_WRITE == 14 && CMD_FILE_APPEND == 15 && CMD_DUMP==16 && CMD_MOVE==17 && CMD_RENAME==18 && CMDTYPES_COUNT==19, "Order of commands is preserved"); 
+              CMD_SIZE==11 && CMD_MKFL==12 && CMD_ASHED==13 && CMD_FILE_WRITE == 14 && CMD_FILE_APPEND == 15 && CMD_DUMP==16 && CMD_MOVE==17 && CMD_RENAME==18 && CMDTYPES_COUNT==19, "Order of commands is preserved"); 
 
 int count_words(char *input)
 {
-    if (DEBUG) shlog(SHLOG_DEBUG, "Count words in `%s`", input);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Count words in `%s`", input);
     int count = 0;
     bool in_word = true;
     while (*input == ' ') input++;
@@ -328,7 +328,7 @@ void tokenize_string(char *input, ArrayOfStrings *words)
 {
     char *tmp = input;
     char word[256];
-    if (DEBUG) shlog(SHLOG_DEBUG, "Tokeninzing string: `%s`", input);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Tokeninzing string: `%s`", input);
     int index = 0;
     while (*tmp != '\0') {
         while (*tmp == ' ') tmp++;
@@ -397,25 +397,25 @@ void cmd_print(Command cmd)
 CmdType getCmdType(char *name)
 {
     static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive parsed command types in getCmdType");
-    if      (streq(name, "doc"))                         return CMD_DOC;
-    if      (streq(name, "echo"))                        return CMD_ECHO;
-    else if (streq(name, "quit")  || streq(name, "q"))   return CMD_QUIT;
-    else if (streq(name, "ls"))                          return CMD_LS;
-    else if (streq(name, "sl"))                          return CMD_SL;
-    else if (streq(name, "cd"))                          return CMD_CD;
-    else if (streq(name, "pwd"))                         return CMD_PWD;
-    else if (streq(name, "mkdir"))                       return CMD_MKDIR;
-    else if (streq(name, "rm"))                          return CMD_RM;
-    else if (streq(name, "clear") || streq(name, "c"))   return CMD_CLEAR;
-    else if (streq(name, "size") || streq(name, "sz"))   return CMD_SIZE;
-    else if (streq(name, "mkfl"))                        return CMD_MKFL;
-    else if (streq(name, "shed") || streq(name, "ed"))   return CMD_SHED;
-    else if (streq(name, ">"))                           return CMD_FILE_WRITE;
-    else if (streq(name, ">>"))                          return CMD_FILE_APPEND;
-    else if (streq(name, "dump") || streq(name, "dp"))   return CMD_DUMP;
-    else if (streq(name, "move") || streq(name, "mv"))   return CMD_MOVE;
-    else if (streq(name, "rename") || streq(name, "rn")) return CMD_RENAME;
-    else                                                 return CMD_UNKNOWN;
+    if      (streq(name, "doc"))                                                 return CMD_DOC;
+    if      (streq(name, "echo"))                                                return CMD_ECHO;
+    else if (streq(name, "quit")  || streq(name, "q"))                           return CMD_QUIT;
+    else if (streq(name, "ls"))                                                  return CMD_LS;
+    else if (streq(name, "sl"))                                                  return CMD_SL;
+    else if (streq(name, "cd"))                                                  return CMD_CD;
+    else if (streq(name, "pwd"))                                                 return CMD_PWD;
+    else if (streq(name, "mkdir"))                                               return CMD_MKDIR;
+    else if (streq(name, "rm"))                                                  return CMD_RM;
+    else if (streq(name, "clear") || streq(name, "c"))                           return CMD_CLEAR;
+    else if (streq(name, "size") || streq(name, "sz"))                           return CMD_SIZE;
+    else if (streq(name, "mkfl"))                                                return CMD_MKFL;
+    else if (streq(name, "ashed") || streq(name, "shed") || streq(name, "ed"))   return CMD_ASHED;
+    else if (streq(name, ">"))                                                   return CMD_FILE_WRITE;
+    else if (streq(name, ">>"))                                                  return CMD_FILE_APPEND;
+    else if (streq(name, "dump") || streq(name, "dp"))                           return CMD_DUMP;
+    else if (streq(name, "move") || streq(name, "mv"))                           return CMD_MOVE;
+    else if (streq(name, "rename") || streq(name, "rn"))                         return CMD_RENAME;
+    else                                                                         return CMD_UNKNOWN;
 }
 
 bool words_to_command(ArrayOfStrings words, Command *cmd)
@@ -470,21 +470,6 @@ bool words_to_command(ArrayOfStrings words, Command *cmd)
     return true;
 }
 
-bool does_file_exist(char *path)
-{
-    struct stat st;
-    return stat(path, &st) == 0;
-}
-
-bool is_dir(char *dir_path)
-{
-    if (!does_file_exist(dir_path)) return false;
-
-    struct stat st;
-    stat(dir_path, &st);
-    return ((st.st_mode & S_IFMT) == S_IFDIR);
-}
-
 // Usage, flags and doc ///////////////////////////
 static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive usage for all commands");
 #define USAGE_DOC         "doc [COMMAND] [...FLAGS]"
@@ -498,7 +483,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive usage for all commands");
 #define USAGE_QUIT        "quit (q)"
 #define USAGE_SIZE        "size (sz) [PATH | .]"
 #define USAGE_MKFL        "mkfl <FILE_PATH>"
-#define USAGE_SHED        "shed (ed) [FILE_PATH | ./NEW]"
+#define USAGE_ASHED        "ashed (shed or ed) [FILE_PATH | ./NEW]"
 #define USAGE_FILE_WRITE  "> <FILE> [INPUT | stdin]"
 #define USAGE_FILE_APPEND ">> <FILE> [INPUT | stdin]"
 #define USAGE_DUMP        "dump (dp) <SRC> [[OPERATOR | >] [...DST]]"
@@ -522,7 +507,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive flags for all commands");
 #define FLAGS_QUIT        NO_FLAGS
 #define FLAGS_SIZE        NO_FLAGS
 #define FLAGS_MKFL        NO_FLAGS
-#define FLAGS_SHED        NO_FLAGS
+#define FLAGS_ASHED        NO_FLAGS
 #define FLAGS_FILE_WRITE  NO_FLAGS
 #define FLAGS_FILE_APPEND NO_FLAGS
 #define FLAGS_DUMP        NO_FLAGS
@@ -541,7 +526,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive doc string for all commands");
 #define DOC_QUIT        "Exit the shell safely."
 #define DOC_SIZE        "Print the size of PATH. If none, print the size of the current directory."
 #define DOC_MKFL        "Create the file at FILE_PATH."
-#define DOC_SHED        "Open FILE_PATH with the builtin `shed` text editor. If none open NEW, an empty unsaved file, in the working directory"
+#define DOC_ASHED        "Open FILE_PATH with the builtin `ashed` text editor. If none open NEW, an empty unsaved file, in the working directory"
 #define DOC_FILE_WRITE  "Write INPUT (default is stdin) to FILE. FILE will be overwritten."
 #define DOC_FILE_APPEND "Append INPUT (default is stdin) to FILE."
 #define DOC_DUMP        "Dump FILE: TODO..."
@@ -586,7 +571,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive commands list");
                     "  - echo    \t" DOC_ECHO "\n"\
                     "  - size    \t" DOC_SIZE "\n"\
                     "  - mkfl    \t" DOC_MKFL "\n"\
-                    "  - shed    \t" DOC_SHED "\n"\
+                    "  - ashed    \t" DOC_ASHED "\n"\
                     "  - >       \t" DOC_FILE_WRITE "\n"\
                     "  - >>      \t" DOC_FILE_APPEND "\n"\
                     "  - dump    \t" DOC_DUMP "\n"\
@@ -625,7 +610,7 @@ DocStrings doc_strings[CMDTYPES_COUNT+1] = {
     {},                                                                               // sl,
     { .doc=DOC_SIZE, .usage=USAGE_SIZE, .flags=FLAGS_SIZE },                          // size,
     { .doc=DOC_MKFL, .usage=USAGE_MKFL, .flags=FLAGS_MKFL },                          // mkfl,
-    { .doc=DOC_SHED,   .usage=USAGE_SHED,   .flags=FLAGS_SHED },                      // ed,
+    { .doc=DOC_ASHED,   .usage=USAGE_ASHED,   .flags=FLAGS_ASHED },                   // ashed,
     { .doc=DOC_FILE_WRITE,   .usage=USAGE_FILE_WRITE,   .flags=FLAGS_FILE_WRITE },    // >,
     { .doc=DOC_FILE_APPEND,   .usage=USAGE_FILE_APPEND,   .flags=FLAGS_FILE_APPEND }, // >>,
     { .doc=DOC_DUMP,   .usage=USAGE_DUMP,   .flags=FLAGS_DUMP },                      // dump,
@@ -801,14 +786,14 @@ int exec_cd(Command *cmd)
         else sprintf(new_dir, new_dir_arg);
     }
 
-    if (DEBUG) shlog(SHLOG_DEBUG, "Current working directory: %s", working_dir);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Current working directory: %s", working_dir);
     if (!is_dir(new_dir)) {
         shlog_not_a_dir(new_dir);
         return 1;
     }
     chdir(new_dir);
     getcwd(working_dir, sizeof(working_dir));
-    if (DEBUG) shlog(SHLOG_DEBUG, "New working directory: %s", working_dir);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "New working directory: %s", working_dir);
     return 0;
 }
 
@@ -861,14 +846,14 @@ bool calculate_file_size(char *file_path, size_t *size)
     shlog(SHLOG_TODO, "Ovviamente non funziona ancora");
     return false;
 
-    if (DEBUG) shlog_NO_NEWLINE(SHLOG_DEBUG, "Calculating size of `%s`", file_path);
+    if (SHDEBUG) shlog_NO_NEWLINE(SHLOG_DEBUG, "Calculating size of `%s`", file_path);
     struct stat st;
     if (stat(file_path, &st) != 0) {
         shlog(SHLOG_ERROR, "Could not open `%s`", file_path);
         return false;
     }
     *size += st.st_size;
-    if (DEBUG) printf(": `%zu`\n", st.st_size);
+    if (SHDEBUG) printf(": `%zu`\n", st.st_size);
     if ((st.st_mode & S_IFMT) == S_IFDIR) {
         DIR *d;
         struct dirent *dire;
@@ -938,12 +923,13 @@ int exec_mkfl(Command *cmd)
     return 0;
 }
 
-int exec_shed(Command *cmd)
+int exec_ashed(Command *cmd)
 {
     CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
-    if (cmd->argc == 0) shlog(SHLOG_DEBUG, "Opening empty file");
-    else shlog(SHLOG_DEBUG, "Opening file `%s`", cmd->argv.items[0]);
-    shlog(SHLOG_TODO, "Not implemented yet");
+    char *filename = NULL;
+    if (cmd->argc == 1) filename = cmd->argv.items[0];
+    int ashed_exit_code = ashed_main(filename);
+    shlog(SHLOG_TODO, "Handle ashed exit code %d", ashed_exit_code);
     return 0;
 }
 
@@ -975,7 +961,7 @@ int exec_file_write(Command *cmd)
     size_t len = strlen(buffer);
     if (len > 0) buffer[len-1] = '\0';
     while(read > 0 && !streq(buffer, SHEOF)) {
-        if (DEBUG) shlog(SHLOG_DEBUG, "`%s`", buffer);
+        if (SHDEBUG) shlog(SHLOG_DEBUG, "`%s`", buffer);
         if (streq(buffer, "\\eof")) fprintf(f, "eof\n");
         else fprintf(f, "%s\n", buffer);
         free(buffer);
@@ -1025,16 +1011,16 @@ int exec_dump(Command *cmd)
         shlog_error_and_reset_errno(NULL);
         return 1;
     }
-    if (DEBUG) shlog(SHLOG_DEBUG, "Dump input: %s", fin_name);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Dump input: %s", fin_name);
 
     FILE *fout = NULL;
     char *options = NULL;
     if (cmd->argc == 1) {
         fout = stdin;
-        if (DEBUG) shlog(SHLOG_DEBUG, "Dump output: stdin");
+        if (SHDEBUG) shlog(SHLOG_DEBUG, "Dump output: stdin");
     } else {
         char *operator = cmd->argv.items[1];
-        if (DEBUG) shlog(SHLOG_DEBUG, "Operator: %s", operator);
+        if (SHDEBUG) shlog(SHLOG_DEBUG, "Operator: %s", operator);
         if (streq(operator, ">")) {
             options = "wb";
         } else if (streq(operator, ">>")) {
@@ -1058,15 +1044,15 @@ int exec_dump(Command *cmd)
             shlog_error_and_reset_errno(NULL);
             return 1;
         }
-        if (DEBUG) shlog(SHLOG_DEBUG, "Dump output: %s", fout_name);
+        if (SHDEBUG) shlog(SHLOG_DEBUG, "Dump output: %s", fout_name);
     }
-    if (DEBUG) shlog(SHLOG_DEBUG, "Dump options: %s", options == NULL ? "none" : options);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Dump options: %s", options == NULL ? "none" : options);
 
     const int BUF_CAP = 1024;
     char buffer[1024] = {0};
     char *line;
     int i = 0;
-    if (DEBUG) shlog(SHLOG_DEBUG, "Input file to read from: %p", fin);
+    if (SHDEBUG) shlog(SHLOG_DEBUG, "Input file to read from: %p", fin);
     while((line = fgets(buffer, BUF_CAP, fin)) != NULL) {
         if (fout == stdin) printf(line);
         else fprintf(fout, line);
@@ -1200,7 +1186,7 @@ int main(void)
         print_prompt();
         read = getline(&line, &line_len, stdin);
         if (read <= 0) {
-            if (DEBUG) shlog(SHLOG_DEBUG, "What's the matter? %s", strerror(errno));
+            if (SHDEBUG) shlog(SHLOG_DEBUG, "What's the matter? %s", strerror(errno));
             if (signalno != 0) {
                 exit_code = EXIT_SIGNAL;
             } else {
@@ -1212,7 +1198,7 @@ int main(void)
         if (len == 0) continue;
         line[len] = '\0';
         cmd_n++;
-        if (DEBUG) shlog(SHLOG_DEBUG, "%d (%u): '%s'", cmd_n, len, line);
+        if (SHDEBUG) shlog(SHLOG_DEBUG, "%d (%u): '%s'", cmd_n, len, line);
         ArrayOfStrings words = {0};
         int word_count = count_words(line);
         aos_init(&words, word_count);
@@ -1223,7 +1209,7 @@ int main(void)
         isCommandValid = words_to_command(words, &command);
         aos_free(&words);
         if (isCommandValid) {
-            if (DEBUG) cmd_print(command);
+            if (SHDEBUG) cmd_print(command);
             switch (command.type)
             {
                 case CMD_DOC:         exec_doc(&command);         break;
@@ -1238,7 +1224,7 @@ int main(void)
                 case CMD_SL:          exec_sl();                  break;
                 case CMD_SIZE:        exec_size(&command);        break;
                 case CMD_MKFL:        exec_mkfl(&command);        break;
-                case CMD_SHED:        exec_shed(&command);        break;
+                case CMD_ASHED:        exec_ashed(&command);        break;
                 case CMD_FILE_WRITE:  exec_file_write(&command);  break;
                 case CMD_FILE_APPEND: exec_file_write(&command);  break;
                 case CMD_DUMP:        exec_dump(&command);        break;

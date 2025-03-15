@@ -1,5 +1,3 @@
 #!/bin/zsh
 
-clear
-
-cc -o ashell main.c -Wall -Wextra -Wswitch-enum  && ./ashell
+cc -o ashell main.c ashed.c ashell_utils.c -lm -Wall -Wextra -Wswitch-enum && ./ashell
