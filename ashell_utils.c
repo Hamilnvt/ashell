@@ -56,7 +56,7 @@ int matoi(char *str)
     int n = 0;
     int len = strlen(str);
     int i = 0;
-    while (i < len) {
+    while (i < len && str[i] != '\0') {
         if (isdigit(str[i])) {
             n += (str[i] - '0')*((int)pow(10, len-i-1));
         } else return -1;

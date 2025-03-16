@@ -1,12 +1,14 @@
 /* TODO
    - swap files
 
-   - Line addresses command:
+   - Line addresses command (da documentare):
      - . (current line, default for everything)
      - $ (last line)
      - n (n-th line)
-     - , (first through last lines = 1,$)
-     - ; (current through last lines = .,$)
+     - , (first through last lines = 1,)
+     - ; (current through last lines)
+     - x,y (range)
+       > x, (or x, shortened or x;) and ,y will be valid ranges
 
    - Comandi:
      - a/.
@@ -75,7 +77,7 @@ bool buffer_init_from_file(Buffer *buf, char *filename)
 {
     FILE *f = fopen(filename, "rb");
     if (f == NULL) {
-        printf("Could not open fil `%s`\n", filename);
+        shlog(SHLOG_ERROR, "Could not open file `%s`\n", filename);
         return false;
     }
     buffer_init(buf);
@@ -104,7 +106,7 @@ bool write_entire_file(char *path, const void *data, size_t size)
 {
     FILE *f = fopen(path, "wb");
     if (f == NULL) {
-        printf("Could not open file `%s` for writing: %s\n", path, strerror(errno));
+        shlog(SHLOG_ERROR, "Could not open file `%s` for writing: %s\n", path, strerror(errno));
         return false; 
     }
 
@@ -112,7 +114,7 @@ bool write_entire_file(char *path, const void *data, size_t size)
     while (size > 0) {
         size_t n = fwrite(buf, 1, size, f);
         if (ferror(f)) {
-            printf("Could not write into file %s: %s\n", path, strerror(errno));
+            shlog(SHLOG_ERROR, "Could not write into file %s: %s\n", path, strerror(errno));
             if (f) fclose(f);
             return true;
         }
@@ -122,6 +124,97 @@ bool write_entire_file(char *path, const void *data, size_t size)
 
     if (f) fclose(f);
     return true;
+}
+
+int count_num_len(char *str)
+{
+    int count = 0;
+    while (isdigit(*str)) {
+        count++;
+        str++;
+    }
+    return count;
+}
+
+int parse_num_and_advance(char **str)
+{
+    if (!isdigit(**str)) return -1;
+    int len = count_num_len(*str);
+    char *tmp = strdup(*str);
+    tmp[len] = '\0';
+    int n = matoi(tmp);
+    free(tmp);
+    for (int i = 0; i < len; i++)
+        (*str)++;
+    return n;
+}
+
+// TODO:
+// - aggiungere la possibilita' di fare:
+//   - n,$
+//   - .,n
+AshedAddress parseAddress(char **line)
+{
+    AshedAddress addr = {0};
+    if (**line == '.') {
+        addr.type = ASHED_ADDR_CURRENT;
+        (*line)++;
+    } else if (**line == '$') {
+        addr.type = ASHED_ADDR_LAST;
+        (*line)++;
+    } else if (**line == ',') {
+        addr.type = ASHED_ADDR_RANGE;
+        (*line)++;
+        addr.r = (Range){
+            .begin = 0,
+            .end = isdigit(**line) ? parse_num_and_advance(line) : -1
+        };
+    } else if (**line == ';') {
+        addr.type = ASHED_ADDR_RANGE;
+        addr.r = (Range){.begin=current_line, .end=-1};
+        (*line)++;
+    } else if (isdigit(**line)) {
+        int first = parse_num_and_advance(line);
+        if (**line == ',') {
+            (*line)++;
+            if (isdigit(**line)) {
+                int second = parse_num_and_advance(line);
+                if (first >= second) addr.type = ASHED_ADDR_INVALID;
+                else {
+                    addr.type = ASHED_ADDR_RANGE;
+                    addr.r = (Range){.begin=first, .end=second};
+                }
+            } else {
+                addr.type= ASHED_ADDR_RANGE;
+                addr.r = (Range){.begin=first, .end=-1};
+            }
+        } else if (**line == ';') {
+            addr.type= ASHED_ADDR_RANGE;
+            addr.r = (Range){.begin=first, .end=-1};
+            (*line)++;
+        } else {
+            addr.type= ASHED_ADDR_NUMBER;
+            addr.n = first;
+        }
+    }
+
+    return addr;
+}
+
+void ashedAddress_print(AshedAddress addr)
+{
+    printf("Address: ");
+    switch (addr.type)
+    {
+        case ASHED_ADDR_INVALID: printf("INVALID");                                  break;
+        case ASHED_ADDR_CURRENT: printf("CURRENT (%d)", current_line);               break;
+        case ASHED_ADDR_LAST:    printf("LAST");                                     break;
+        case ASHED_ADDR_NUMBER:  printf("NUMBER (%d)", addr.n);                      break;
+        case ASHED_ADDR_RANGE:   printf("RANGE (%d, %d)", addr.r.begin, addr.r.end); break;
+        case ASHED_ADDR_COUNT:   
+        default:                 shlog(SHLOG_FATAL, "Unreachable");                  abort();
+    }
+    printf("\n");
 }
 
 void ashed_quit(int *code, char *line)
@@ -136,7 +229,9 @@ void ashed_quit(int *code, char *line)
     } else if (streq(line, "q!")) *code = -1;
     else *code = 1;
 }
+
 void ashed_clear(int *code) { printf("\e[1;1H\e[2J"); *code = 0; }
+
 void ashed_print(int *code, char *line) {
     if (strlen(line) > 2) RETURN_CODE(1);
 
@@ -255,7 +350,7 @@ void ashed_write_file(int *code, char *line)
             blob[total_len-1] = '\n';
         }
     }
-    if (EDDEBUG) printf("Blob: %s", blob);
+    if (EDDEBUG) shlog(SHLOG_DEBUG, "Blob: %s", blob);
     size_t write_size = total_len*sizeof(char);
     printf("%zu\n", write_size);
     if (!write_entire_file(filename, blob, write_size)) RETURN_CODE(2);
@@ -292,13 +387,20 @@ int ashed_main(char *ashell_filename)
         else printf("I%d: ", current_line + 1);
         line = fgets(input_buffer, MAX_CHARS, stdin);
         if (line == NULL) {
-            printf("Could not read line\n");
+            shlog(SHLOG_ERROR, "Could not read line\n");
             continue;
         }
         if (!remove_newline(&line)) continue;
+
         if (mode == ASHED_MODE_COMMAND) {
             line = remove_spaces(line);
-            if      (streq(line, "c")) ashed_clear(&ashed_code);
+            AshedAddress address = parseAddress(&line);
+            ashedAddress_print(address);
+            // TODO: passare l'address ai comandi che lo richiedono
+            printf("now parse command from `%s`\n", line);
+
+            if      (streq(line, ""))  shlog(SHLOG_TODO, "Go to line, range has no meaning");
+            else if (streq(line, "c")) ashed_clear(&ashed_code);
             else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
             else if (line[0] == 'p')   ashed_print(&ashed_code, line);
             else if (line[0] == '+')   ashed_advance(&ashed_code, line);
@@ -309,12 +411,12 @@ int ashed_main(char *ashell_filename)
 
             if      (ashed_code == -1) break;
             else if (ashed_code == 1)  printf("huh?\n");
-            else if (ashed_code != 0)  printf("[FATAL] Unknown shed exit code %d\n", ashed_code);
+            else if (ashed_code != 0)  shlog(SHLOG_FATAL, "Unknown shed exit code %d\n", ashed_code);
         } else if (mode == ASHED_MODE_INPUT) {
             if (streq(line, ".")) ashed_goto_command_mode(&ashed_code, &mode);
             else                  ashed_write_line(&ashed_code, line);
         } else {
-            printf("[ERROR] Unknown shed mode (%d)\n", mode);
+            shlog(SHLOG_ERROR, "Unknown shed mode (%d)\n", mode);
             buffer_free(&ashed_buffer);
             abort();
             return 1;

@@ -65,16 +65,16 @@ void sigint_handler(int signo) {
 
 void test_shlog_levels()
 {
-    char *test_str = "prova";
-    shlog(SHLOG_INFO, test_str);
-    shlog(SHLOG_DOC, test_str);
-    shlog(SHLOG_USAGE, test_str);
-    shlog(SHLOG_FLAGS, test_str);
-    shlog(SHLOG_TODO, test_str);
-    shlog(SHLOG_DEBUG, test_str);
-    shlog(SHLOG_WARNING, test_str);
-    shlog(SHLOG_ERROR, test_str);
-    shlog(SHLOG_FATAL, test_str);
+    char *str = "prova";
+    shlog(SHLOG_INFO, str);
+    shlog(SHLOG_DOC, str);
+    shlog(SHLOG_USAGE, str);
+    shlog(SHLOG_FLAGS, str);
+    shlog(SHLOG_TODO, str);
+    shlog(SHLOG_DEBUG, str);
+    shlog(SHLOG_WARNING, str);
+    shlog(SHLOG_ERROR, str);
+    shlog(SHLOG_FATAL, str);
 }
 
 void Start()
@@ -86,7 +86,7 @@ void Start()
     if (SHDEBUG) shlog(SHLOG_DEBUG, "Working in %s", working_dir);
     if (SHDEBUG) shlog(SHLOG_DEBUG, "Root: %s", root_dir);
 
-    test_shlog_levels();
+    //test_shlog_levels();
 
     struct sigaction sigint_action = { .sa_handler = sigint_handler };
     sigaction(SIGINT, &sigint_action, NULL);
@@ -684,6 +684,7 @@ int exec_mkfl(Command *cmd)
     return 0;
 }
 
+// TODO: WIP
 int exec_ashed(Command *cmd)
 {
     CHECK_TOO_MANY_ARGUMENTS(cmd, 1);

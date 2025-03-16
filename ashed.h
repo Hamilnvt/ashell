@@ -42,7 +42,7 @@ void ashed_write_file(int *code, char *line);
 
 typedef enum
 {
-    ASHED_ADDR_INVALID,
+    ASHED_ADDR_INVALID = -1,
     ASHED_ADDR_CURRENT,
     ASHED_ADDR_LAST,
     ASHED_ADDR_NUMBER,
