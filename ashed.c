@@ -5,19 +5,21 @@
      - . (current line, default for everything)
      - $ (last line)
      - n (n-th line)
+     - +(n)
+     - -(n)
      - , (first through last lines = 1,)
      - ; (current through last lines)
      - x,y (range)
        > x, (or x, shortened or x;) and ,y will be valid ranges
 
    - Comandi:
-     - a/.
+     - a/. (oppure i?)
      - h
      - w
      - q!
 
    Urgent Stack:
-   - parsing dell'address e poi del command (default = current line) -> i comandi saranno del tipo [address | .]cmd (ora non e' cosi')
+   - documentare tutto [address | .]cmd
 
     https://www.gnu.org/software/ed/manual/ed_manual.html
     https://www.redhat.com/en/blog/introduction-ed-editor
@@ -62,15 +64,40 @@ void buffer_write_line(Buffer *buf, char *line_str, int line_n)
     buf->items[line_n] = strdup(line_str);
 }
 
+void buffer_print_line(Buffer buf, int line_n)
+{
+    if (line_n >= 0 && line_n < buf.count)
+    {
+        if (buf.items[line_n] != NULL) {
+            printf("%s", buf.items[line_n]);
+            if (!streq(buf.items[line_n], "\n")) printf("\n");
+        }
+    } else shlog(SHLOG_FATAL, "Can not print line %d", line_n);
+}
+
+void buffer_print_range(Buffer buf, Range r)
+{
+    if (r.begin >= 0 && r.end < buf.count) {
+        int width = log10(r.end)+1;
+        printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+        for (int i = r.begin; i <= r.end; i++) {
+            printf("%*d: ", width, i+1);
+            buffer_print_line(buf, i);
+        }
+        printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+    } else shlog(SHLOG_FATAL, "Can not print range (%d, %d)", r.begin, r.end);
+}
+
 void buffer_print(Buffer buf)
 {
-    if (buf.count > 0) {
-        int width = log10(buf.count)+1;
-        printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-        for (int i = 0; i < buf.count; i++)
-            printf("%*d: %s\n", width, i+1, buf.items[i]);
-        printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-    }
+    //if (buf.count > 0) {
+    //    int width = log10(buf.count)+1;
+    //    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+    //    for (int i = 0; i < buf.count; i++)
+    //        printf("%*d: %s\n", width, i+1, buf.items[i]);
+    //    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+    //}
+    buffer_print_range(buf, (Range){0, buf.count});
 }
 
 bool buffer_init_from_file(Buffer *buf, char *filename)
@@ -150,9 +177,7 @@ int parse_num_and_advance(char **str)
 }
 
 // TODO:
-// - aggiungere la possibilita' di fare:
-//   - n,$
-//   - .,n
+// - possibilita' di fare ++ e avanzare di 2 (e cosi' via, anche con il -)
 AshedAddress parseAddress(char **line)
 {
     AshedAddress addr = {0};
@@ -167,12 +192,26 @@ AshedAddress parseAddress(char **line)
         (*line)++;
         addr.r = (Range){
             .begin = 0,
-            .end = isdigit(**line) ? parse_num_and_advance(line) : -1
+            .end = isdigit(**line) ? parse_num_and_advance(line)-1 : ashed_buffer.count-1
         };
     } else if (**line == ';') {
         addr.type = ASHED_ADDR_RANGE;
-        addr.r = (Range){.begin=current_line, .end=-1};
+        addr.r = (Range){.begin=current_line, .end=ashed_buffer.count-1};
         (*line)++;
+    } else if (**line == '+') {
+        addr.type = ASHED_ADDR_NEXT; 
+        (*line)++;
+        if (isdigit(**line)) {
+            addr.n = parse_num_and_advance(line); 
+        } else addr.n = 1;
+        if (current_line + addr.n > ashed_buffer.count-1) addr.type = ASHED_ADDR_INVALID;
+    } else if (**line == '-') {
+        addr.type = ASHED_ADDR_PREV; 
+        (*line)++;
+        if (isdigit(**line)) {
+            addr.n = parse_num_and_advance(line); 
+        } else addr.n = 1;
+        if (current_line - addr.n < 0) addr.type = ASHED_ADDR_INVALID;
     } else if (isdigit(**line)) {
         int first = parse_num_and_advance(line);
         if (**line == ',') {
@@ -182,19 +221,21 @@ AshedAddress parseAddress(char **line)
                 if (first >= second) addr.type = ASHED_ADDR_INVALID;
                 else {
                     addr.type = ASHED_ADDR_RANGE;
-                    addr.r = (Range){.begin=first, .end=second};
+                    addr.r = (Range){.begin=first-1, .end=second-1};
                 }
             } else {
                 addr.type= ASHED_ADDR_RANGE;
-                addr.r = (Range){.begin=first, .end=-1};
+                addr.r = (Range){.begin=first-1, .end=ashed_buffer.count-1};
             }
         } else if (**line == ';') {
             addr.type= ASHED_ADDR_RANGE;
-            addr.r = (Range){.begin=first, .end=-1};
+            addr.r = (Range){.begin=first-1, .end=ashed_buffer.count-1};
             (*line)++;
-        } else {
-            addr.type= ASHED_ADDR_NUMBER;
-            addr.n = first;
+        } else { 
+            if (first >= 1 && first <= ashed_buffer.count) {
+                addr.type= ASHED_ADDR_NUMBER;
+                addr.n = first;
+            } else addr.type = ASHED_ADDR_INVALID; // TODO: mettere un errore del tipo "out of range"
         }
     }
 
@@ -210,8 +251,9 @@ void ashedAddress_print(AshedAddress addr)
         case ASHED_ADDR_CURRENT: printf("CURRENT (%d)", current_line);               break;
         case ASHED_ADDR_LAST:    printf("LAST");                                     break;
         case ASHED_ADDR_NUMBER:  printf("NUMBER (%d)", addr.n);                      break;
+        case ASHED_ADDR_NEXT:    printf("NEXT (+%d)", addr.n);                       break;
+        case ASHED_ADDR_PREV:    printf("PREV (-%d)", addr.n);                       break;
         case ASHED_ADDR_RANGE:   printf("RANGE (%d, %d)", addr.r.begin, addr.r.end); break;
-        case ASHED_ADDR_COUNT:   
         default:                 shlog(SHLOG_FATAL, "Unreachable");                  abort();
     }
     printf("\n");
@@ -232,69 +274,30 @@ void ashed_quit(int *code, char *line)
 
 void ashed_clear(int *code) { printf("\e[1;1H\e[2J"); *code = 0; }
 
-void ashed_print(int *code, char *line) {
-    if (strlen(line) > 2) RETURN_CODE(1);
-
-    if (streq(line, "p")) {
-        if (ashed_buffer.items[current_line] != NULL) printf("%s\n", ashed_buffer.items[current_line]);
-        RETURN_CODE(0);
-    }
-
-    if (line[1] == 'a') {
-        buffer_print(ashed_buffer);
-        RETURN_CODE(0);
-    }
-
-    if (isdigit(line[1])) {
-        line++;
-        int n = matoi(line);
-        if (n > 0 && n <= ashed_buffer.count && ashed_buffer.items[n-1] != NULL) {
-            printf("%s\n", ashed_buffer.items[n-1]);
-            RETURN_CODE(0);
-        } else RETURN_CODE(1);
-    }
-
-    RETURN_CODE(1);
-}
-
-void ashed_advance(int *code, char *line)
+void ashed_print(int *code, AshedAddress addr)
 {
-    size_t len = strlen(line);
-    int n = 0;
+    int line_to_print;
+    bool print_single_line = true;
+    switch(addr.type)
+    {
+        case ASHED_ADDR_CURRENT: line_to_print = current_line;              break;
+        case ASHED_ADDR_LAST:    line_to_print = ashed_buffer.count-1;      break;
+        case ASHED_ADDR_NUMBER:  line_to_print = addr.n - 1;                break;
+        case ASHED_ADDR_NEXT:    line_to_print = current_line + addr.n;     break; 
+        case ASHED_ADDR_PREV:    line_to_print = current_line - addr.n;     break; 
 
-    if (len == 1) {
-        n = 1;
-    } else {
-        line++;
-        n = matoi(line);
+        case ASHED_ADDR_RANGE:   print_single_line = false;                 break;
+        case ASHED_ADDR_INVALID:
+        default:                 shlog(SHLOG_FATAL, "Unreachable");                 abort();
     }
 
-    if (n != -1) {
-        current_line = (current_line + n) % ashed_buffer.count;
-        RETURN_CODE(0);
-    } else RETURN_CODE(1);
-
-    RETURN_CODE(1);
-}
-
-void ashed_retreat(int *code, char *line)
-{
-    size_t len = strlen(line);
-    int n = 0;
-
-    if (len == 1) {
-        n = 1;
+    if (print_single_line) {
+        buffer_print_line(ashed_buffer, line_to_print);
     } else {
-        line++;
-        n = matoi(line);
+        buffer_print_range(ashed_buffer, addr.r);
     }
-
-    if (n != -1) {
-        current_line = (current_line + ashed_buffer.count - n) % ashed_buffer.count;
-        RETURN_CODE(0);
-    } else RETURN_CODE(1);
-
-    RETURN_CODE(1);
+    
+    RETURN_CODE(0);
 }
 
 void ashed_goto_input_mode(int *code, char *line, AshedMode *mode)
@@ -359,9 +362,24 @@ void ashed_write_file(int *code, char *line)
     else RETURN_CODE(0);
 }
 
+void ashed_goto_line(int *code, AshedAddress addr)
+{
+    switch(addr.type)
+    {
+        case ASHED_ADDR_CURRENT:                                                    break;
+        case ASHED_ADDR_LAST:    current_line = ashed_buffer.count-1;               break;
+        case ASHED_ADDR_NUMBER:  current_line =  addr.n - 1;                        break;
+        case ASHED_ADDR_NEXT:    current_line += addr.n - 1;                        break; 
+        case ASHED_ADDR_PREV:    current_line -= addr.n - 1;                        break; 
+        case ASHED_ADDR_RANGE:   shlog(SHLOG_WARNING, "Range alone has no effect"); break;
+        case ASHED_ADDR_INVALID:
+        default:                 shlog(SHLOG_FATAL, "Unreachable");                 abort();
+    }
+    RETURN_CODE(0);
+}
+
 int ashed_main(char *ashell_filename)
 {
-    // TODO: questa la ricrea ogni volta o rimane?
     static int ashed_file_n = 0;
 
     if (ashell_filename == NULL) {
@@ -395,19 +413,23 @@ int ashed_main(char *ashell_filename)
         if (mode == ASHED_MODE_COMMAND) {
             line = remove_spaces(line);
             AshedAddress address = parseAddress(&line);
-            ashedAddress_print(address);
-            // TODO: passare l'address ai comandi che lo richiedono
-            printf("now parse command from `%s`\n", line);
 
-            if      (streq(line, ""))  shlog(SHLOG_TODO, "Go to line, range has no meaning");
-            else if (streq(line, "c")) ashed_clear(&ashed_code);
-            else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
-            else if (line[0] == 'p')   ashed_print(&ashed_code, line);
-            else if (line[0] == '+')   ashed_advance(&ashed_code, line);
-            else if (line[0] == '-')   ashed_retreat(&ashed_code, line);
-            else if (line[0] == 'i')   ashed_goto_input_mode(&ashed_code, line, &mode);
-            else if (line[0] == 'w')   ashed_write_file(&ashed_code, line);
-            else                       ashed_code = 1;
+            ashedAddress_print(address);
+            if (EDDEBUG) {
+                printf("now parse command from `%s`\n", line);
+            }
+
+            if (address.type == ASHED_ADDR_INVALID) {
+                ashed_code = 1;
+            } else {
+                if      (streq(line, "c")) ashed_clear(&ashed_code);
+                else if (streq(line, "p")) ashed_print(&ashed_code, address);
+                else if (streq(line, "i")) ashed_goto_input_mode(&ashed_code, &mode);
+                else if (line[0] == 'w')   ashed_write_file(&ashed_code, line);
+                else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
+                else if (streq(line, ""))  ashed_goto_line(&ashed_code, address);
+                else                       ashed_code = 1;
+            }
 
             if      (ashed_code == -1) break;
             else if (ashed_code == 1)  printf("huh?\n");

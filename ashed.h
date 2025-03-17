@@ -23,11 +23,6 @@ void buffer_print(Buffer buf);
 bool buffer_init_from_file(Buffer *buf, char *filename);
 void buffer_free(Buffer *buffer);
 bool write_entire_file(char *path, const void *data, size_t size);
-void ashed_quit(int *code, char *line);
-void ashed_clear(int *code);
-void ashed_print(int *code, char *line);
-void ashed_advance(int *code, char *line);
-void ashed_retreat(int *code, char *line);
 
 typedef enum
 {
@@ -46,8 +41,9 @@ typedef enum
     ASHED_ADDR_CURRENT,
     ASHED_ADDR_LAST,
     ASHED_ADDR_NUMBER,
+    ASHED_ADDR_NEXT,
+    ASHED_ADDR_PREV,
     ASHED_ADDR_RANGE,
-    ASHED_ADDR_COUNT,
 } AshedAddressType;
 
 typedef struct
@@ -64,6 +60,12 @@ typedef struct
         Range r;
     };
 } AshedAddress;
+
+void ashed_quit(int *code, char *line);
+void ashed_clear(int *code);
+void ashed_print(int *code, AshedAddress addr);
+void ashed_advance(int *code, AshedAddress addr);
+void ashed_retreat(int *code, AshedAddress addr);
 
 #endif // ASHED_H_
 
