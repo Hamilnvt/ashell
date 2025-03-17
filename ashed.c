@@ -13,10 +13,9 @@
        > x, (or x, shortened or x;) and ,y will be valid ranges
 
    - Comandi:
-     - a/. (oppure i?)
+     - i (inserisce una riga dopo quella in cui si e', oppure dato dall'address)
+     - d
      - h
-     - w
-     - q!
 
    Urgent Stack:
    - documentare tutto [address | .]cmd
@@ -32,6 +31,7 @@ int current_line = 0;
 char filename[256] = {0};
 bool saved = true;
 Buffer ashed_buffer = {0};
+AshedAddress *saved_addr = NULL;
 //////////////////
 
 void buffer_init(Buffer *buf)
@@ -127,6 +127,37 @@ void buffer_free(Buffer *buffer)
         if (buffer->items[i] != NULL) free(buffer->items[i]);
     }
     free(buffer->items);
+}
+
+void buffer_shift_right(Buffer *buf, int n)
+{
+    if (line_n >= 0 && line_n < buf->count) {
+        buf->count++;
+        char *tmp = NULL;
+        for (int i = buf->count-1; i > line_n; i--) {
+            tmp = strdup(buf->items[i-1]);
+            free(buf->items[i-1]);
+            buf->items[i-1] = NULL;
+            buf->items[i] = strdup(tmp);
+            free(tmp);
+        }
+    } else shlog(SHLOG_FATAL, "Can not shift right %d", line_n);
+}
+
+// TODO: wip
+void buffer_shift_left(Buffer *buf, int line_n)
+{
+    if (line_n >= 0 && line_n < buf->count) {
+        buf->count++;
+        char *tmp = NULL;
+        for (int i = buf->count-1; i > line_n; i--) {
+            tmp = strdup(buf->items[i-1]);
+            free(buf->items[i-1]);
+            buf->items[i-1] = NULL;
+            buf->items[i] = strdup(tmp);
+            free(tmp);
+        }
+    } else shlog(SHLOG_FATAL, "Can not shift left %d", line_n);
 }
 
 bool write_entire_file(char *path, const void *data, size_t size)
@@ -300,22 +331,31 @@ void ashed_print(int *code, AshedAddress addr)
     RETURN_CODE(0);
 }
 
-void ashed_goto_input_mode(int *code, char *line, AshedMode *mode)
+void ashed_goto_append_mode(int *code, AshedMode *mode) 
 {
-    int len = strlen(line);
-    if (len == 1) {
-        *mode = ASHED_MODE_INPUT;
-        RETURN_CODE(0);
-    }
-
-    RETURN_CODE(1);
+    *mode = ASHED_MODE_APPEND;
+    current_line = ashed_buffer.count;
+    ashed_buffer.count++;
+    RETURN_CODE(0);
 }
 
-void ashed_goto_command_mode(int *code, AshedMode *mode)
+void ashed_goto_insert_mode(int *code, AshedMode *mode, AshedAddress addr) 
 {
-    *mode = ASHED_MODE_COMMAND;
-    *code = 0; 
+    *mode = ASHED_MODE_INSERT;
+    saved_addr = malloc(sizeof(AshedAddress));
+    *saved_addr = addr;
+    RETURN_CODE(0);
 }
+
+void ashed_goto_replace_mode(int *code, AshedMode *mode, AshedAddress addr) 
+{
+    *mode = ASHED_MODE_REPLACE;
+    saved_addr = malloc(sizeof(AshedAddress));
+    *saved_addr = addr;
+    RETURN_CODE(0);
+}
+
+void ashed_goto_command_mode(int *code, AshedMode *mode) { *mode = ASHED_MODE_COMMAND; RETURN_CODE(0); }
 
 void ashed_write_line(int *code, char *line)
 {
@@ -369,12 +409,63 @@ void ashed_goto_line(int *code, AshedAddress addr)
         case ASHED_ADDR_CURRENT:                                                    break;
         case ASHED_ADDR_LAST:    current_line = ashed_buffer.count-1;               break;
         case ASHED_ADDR_NUMBER:  current_line =  addr.n - 1;                        break;
-        case ASHED_ADDR_NEXT:    current_line += addr.n - 1;                        break; 
-        case ASHED_ADDR_PREV:    current_line -= addr.n - 1;                        break; 
+        case ASHED_ADDR_NEXT:    current_line += addr.n;                            break; // TODO: e' giusto?
+        case ASHED_ADDR_PREV:    current_line -= addr.n;                            break; 
         case ASHED_ADDR_RANGE:   shlog(SHLOG_WARNING, "Range alone has no effect"); break;
         case ASHED_ADDR_INVALID:
         default:                 shlog(SHLOG_FATAL, "Unreachable");                 abort();
     }
+    buffer_print_line(ashed_buffer, current_line);
+    RETURN_CODE(0);
+}
+
+void ashed_insert_line(int *code, char *line_str)
+{
+    int line_n;
+    switch(saved_addr->type)
+    {
+        case ASHED_ADDR_CURRENT: line_n = current_line;                          break;
+        case ASHED_ADDR_LAST:    line_n = ashed_buffer.count-1;                  break;
+        case ASHED_ADDR_NUMBER:  line_n = saved_addr->n - 1;                     break;
+        case ASHED_ADDR_NEXT:    line_n = current_line + saved_addr->n;          break; 
+        case ASHED_ADDR_PREV:    line_n = current_line - saved_addr->n;          break; 
+        case ASHED_ADDR_RANGE:   { shlog(SHLOG_WARNING, "Cannot insert a range"); RETURN_CODE(1); }
+        case ASHED_ADDR_INVALID:
+        default:                 shlog(SHLOG_FATAL, "Unreachable");              abort();
+    }
+    buffer_shift_at(&ashed_buffer, line_n);
+    buffer_write_line(&ashed_buffer, line_str, line_n);
+
+    saved_addr->n++;
+    current_line++;
+    RETURN_CODE(0);
+}
+
+// TODO: replace range cancella tutte le righe del range e ne riscrive solamente una
+void ashed_replace_line(int *code, char *line_str)
+{
+    int line_n;
+    switch(saved_addr->type)
+    {
+        case ASHED_ADDR_CURRENT: line_n = current_line;                          break;
+        case ASHED_ADDR_LAST:    line_n = ashed_buffer.count-1;                  break;
+        case ASHED_ADDR_NUMBER:  line_n = saved_addr->n - 1;                     break;
+        case ASHED_ADDR_NEXT:    line_n = current_line + saved_addr->n;          break; 
+        case ASHED_ADDR_PREV:    line_n = current_line - saved_addr->n;          break; 
+        case ASHED_ADDR_RANGE:   { shlog(SHLOG_WARNING, "Cannot replace a range"); RETURN_CODE(1); } // TODO: in realta' si puo'
+        case ASHED_ADDR_INVALID:
+        default:                 shlog(SHLOG_FATAL, "Unreachable");              abort();
+    }
+    buffer_write_line(&ashed_buffer, line_str, line_n);
+
+    free(saved_addr);
+    saved_addr = NULL;
+    RETURN_CODE(0);
+}
+
+void ashed_delete(int *code, AshedAddress addr)
+{
+    shlog(SHLOG_TODO, "Not yet implemented -> delete");
     RETURN_CODE(0);
 }
 
@@ -395,14 +486,20 @@ int ashed_main(char *ashell_filename)
     }
 
     printf("ashed - %s\n\n", filename);
-    AshedMode mode = ASHED_MODE_COMMAND;
+    AshedMode ashed_mode = ASHED_MODE_COMMAND;
     int ashed_code = 0;
     char input_buffer[MAX_CHARS];
     char *line = NULL;
 
     while (true) {
-        if (mode == ASHED_MODE_COMMAND) printf("C%d: ", current_line + 1);
-        else printf("I%d: ", current_line + 1);
+        switch(ashed_mode)
+        {
+            case ASHED_MODE_COMMAND:  printf("C%d: ", current_line + 1); break;
+            case ASHED_MODE_APPEND:   printf("A%d: ", current_line + 1); break;
+            case ASHED_MODE_INSERT:   printf("I%d: ", current_line + 1); break;
+            case ASHED_MODE_REPLACE:  printf("R%d: ", current_line + 1); break;
+            default: shlog(SHLOG_FATAL, "Unknow ashed mode %d", ashed_mode); abort();
+        }
         line = fgets(input_buffer, MAX_CHARS, stdin);
         if (line == NULL) {
             shlog(SHLOG_ERROR, "Could not read line\n");
@@ -410,12 +507,12 @@ int ashed_main(char *ashell_filename)
         }
         if (!remove_newline(&line)) continue;
 
-        if (mode == ASHED_MODE_COMMAND) {
+        if (ashed_mode == ASHED_MODE_COMMAND) {
             line = remove_spaces(line);
             AshedAddress address = parseAddress(&line);
 
-            ashedAddress_print(address);
             if (EDDEBUG) {
+                ashedAddress_print(address);
                 printf("now parse command from `%s`\n", line);
             }
 
@@ -424,7 +521,10 @@ int ashed_main(char *ashell_filename)
             } else {
                 if      (streq(line, "c")) ashed_clear(&ashed_code);
                 else if (streq(line, "p")) ashed_print(&ashed_code, address);
-                else if (streq(line, "i")) ashed_goto_input_mode(&ashed_code, &mode);
+                else if (streq(line, "a")) ashed_goto_append_mode(&ashed_code, &ashed_mode);
+                else if (streq(line, "i")) ashed_goto_insert_mode(&ashed_code, &ashed_mode, address);
+                else if (streq(line, "r")) ashed_goto_replace_mode(&ashed_code, &ashed_mode, address);
+                else if (streq(line, "d")) ashed_delete(&ashed_code, address);
                 else if (line[0] == 'w')   ashed_write_file(&ashed_code, line);
                 else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
                 else if (streq(line, ""))  ashed_goto_line(&ashed_code, address);
@@ -434,11 +534,35 @@ int ashed_main(char *ashell_filename)
             if      (ashed_code == -1) break;
             else if (ashed_code == 1)  printf("huh?\n");
             else if (ashed_code != 0)  shlog(SHLOG_FATAL, "Unknown shed exit code %d\n", ashed_code);
-        } else if (mode == ASHED_MODE_INPUT) {
-            if (streq(line, ".")) ashed_goto_command_mode(&ashed_code, &mode);
+        } else if (ashed_mode == ASHED_MODE_APPEND) {
+            if (streq(line, ".")) ashed_goto_command_mode(&ashed_code, &ashed_mode);
             else                  ashed_write_line(&ashed_code, line);
+        } else if (ashed_mode == ASHED_MODE_INSERT) {
+            if (saved_addr == NULL) {
+                shlog(SHLOG_FATAL, "No saved address found");
+                abort();
+            }
+            if (streq(line, ".")) {
+                free(saved_addr);
+                saved_addr = NULL;
+                ashed_goto_command_mode(&ashed_code, &ashed_mode);
+            } else {
+                ashed_insert_line(&ashed_code, line);
+            }
+        } else if (ashed_mode == ASHED_MODE_REPLACE) {
+            if (saved_addr == NULL) {
+                shlog(SHLOG_FATAL, "No saved address found");
+                abort();
+            }
+            if (streq(line, ".")) {
+                free(saved_addr);
+                saved_addr = NULL;
+            } else {
+                ashed_replace_line(&ashed_code, line);
+            }
+            ashed_goto_command_mode(&ashed_code, &ashed_mode);
         } else {
-            shlog(SHLOG_ERROR, "Unknown shed mode (%d)\n", mode);
+            shlog(SHLOG_ERROR, "Unknown ashed mode (%d)\n", ashed_mode);
             buffer_free(&ashed_buffer);
             abort();
             return 1;

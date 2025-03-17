@@ -21,19 +21,19 @@ void buffer_init(Buffer *buf);
 void buffer_write_line(Buffer *buf, char *line_str, int line_n);
 void buffer_print(Buffer buf);
 bool buffer_init_from_file(Buffer *buf, char *filename);
-void buffer_free(Buffer *buffer);
+void buffer_free(Buffer *buf);
+void buffer_shift_right(Buffer *buf, int n);
+void buffer_shift_left(Buffer *buf, int n);
+
 bool write_entire_file(char *path, const void *data, size_t size);
 
 typedef enum
-{
+{    
     ASHED_MODE_COMMAND,
-    ASHED_MODE_INPUT,
+    ASHED_MODE_APPEND,
+    ASHED_MODE_INSERT,
+    ASHED_MODE_REPLACE,
 } AshedMode;
-
-void ashed_goto_input_mode(int *code, char *line, AshedMode *mode);
-void ashed_goto_command_mode(int *code, AshedMode *mode);
-void ashed_write_line(int *code, char *line);
-void ashed_write_file(int *code, char *line);
 
 typedef enum
 {
@@ -61,11 +61,20 @@ typedef struct
     };
 } AshedAddress;
 
+void ashed_goto_command_mode(int *code, AshedMode *mode);
+void ashed_goto_append_mode(int *code, AshedMode *mode);
+void ashed_goto_replace_mode(int *code, AshedMode *mode, AshedAddress addr);
+void ashed_write_line(int *code, char *line);
+void ashed_write_file(int *code, char *line);
+
 void ashed_quit(int *code, char *line);
 void ashed_clear(int *code);
 void ashed_print(int *code, AshedAddress addr);
 void ashed_advance(int *code, AshedAddress addr);
 void ashed_retreat(int *code, AshedAddress addr);
+void ashed_replace_line(int *code, char *line);
+void ashed_insert_line(int *code, char *line);
+void ashed_delete(int *code, AshedAddress addr);
 
 #endif // ASHED_H_
 
