@@ -22,8 +22,8 @@ void buffer_write_line(Buffer *buf, char *line_str, int line_n);
 void buffer_print(Buffer buf);
 bool buffer_init_from_file(Buffer *buf, char *filename);
 void buffer_free(Buffer *buf);
-void buffer_shift_right(Buffer *buf, int n);
-void buffer_shift_left(Buffer *buf, int n);
+void buffer_shift_right(Buffer *buf, int line_n);
+void buffer_shift_left(Buffer *buf, int line_n);
 
 bool write_entire_file(char *path, const void *data, size_t size);
 
