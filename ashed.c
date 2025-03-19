@@ -202,13 +202,27 @@ int parse_num_and_advance(char **str)
 }
 
 // TODO:
-// - possibilita' di fare ++ e avanzare di 2 (e cosi' via, anche con il -)
+// - funziona, ma c'e' troppo codice ripetuto aaaa, ma adesso non ho voglia di sistemarlo
 AshedAddress parseAddress(char **line)
 {
     AshedAddress addr = {0};
     if (**line == '.') {
         addr.type = ASHED_ADDR_CURRENT;
         (*line)++;
+        if (**line == ',') {
+            addr.type= ASHED_ADDR_RANGE;
+            (*line)++;
+            if (**line == '.') addr.type = ASHED_ADDR_INVALID;
+            else if (**line == '$') {
+                addr.r = (Range){.begin=current_line, .end=ashed_buffer.count-1};
+                (*line)++;
+            } else if (isdigit(**line)) {
+                int second = parse_num_and_advance(line);
+                if (second-1 == current_line) addr.type = ASHED_ADDR_INVALID;
+                else addr.r = (Range){.begin=current_line, .end=second-1};
+            } else if (current_line == ashed_buffer.count-1) addr.type = ASHED_ADDR_INVALID;
+            else addr.r = (Range){.begin=current_line, .end=ashed_buffer.count-1};
+        }
     } else if (**line == '$') {
         addr.type = ASHED_ADDR_LAST;
         (*line)++;
@@ -228,39 +242,53 @@ AshedAddress parseAddress(char **line)
         (*line)++;
         if (isdigit(**line)) {
             addr.n = parse_num_and_advance(line); 
+        } else if (**line == '+') {
+            int count = 2;
+            (*line)++;
+            while (**line == '+') {
+                (*line)++;
+                count++;
+            }
+            printf("%d +\n", count);
+            addr.n = count;
         } else addr.n = 1;
-        if (current_line + addr.n > ashed_buffer.count-1) addr.type = ASHED_ADDR_INVALID;
+        if (current_line + addr.n >= ashed_buffer.count) addr.type = ASHED_ADDR_INVALID;
     } else if (**line == '-') {
         addr.type = ASHED_ADDR_PREV; 
         (*line)++;
         if (isdigit(**line)) {
             addr.n = parse_num_and_advance(line); 
+        } else if (**line == '-') { 
+            int count = 2;
+            (*line)++;
+            while (**line == '-') {
+                (*line)++;
+                count++;
+            }
+            addr.n = count;
         } else addr.n = 1;
         if (current_line - addr.n < 0) addr.type = ASHED_ADDR_INVALID;
     } else if (isdigit(**line)) {
         int first = parse_num_and_advance(line);
         if (**line == ',') {
+            addr.type= ASHED_ADDR_RANGE;
             (*line)++;
-            if (isdigit(**line)) {
+            if (**line == '.') {
+                addr.r = (Range){.begin=first-1, .end=current_line};
+                (*line)++;
+            } else if (**line == '$') {
+                addr.r = (Range){.begin=first-1, .end=ashed_buffer.count-1};
+                (*line)++;
+            } else if (isdigit(**line)) {
                 int second = parse_num_and_advance(line);
                 if (first >= second) addr.type = ASHED_ADDR_INVALID;
-                else {
-                    addr.type = ASHED_ADDR_RANGE;
-                    addr.r = (Range){.begin=first-1, .end=second-1};
-                }
-            } else {
-                addr.type= ASHED_ADDR_RANGE;
-                addr.r = (Range){.begin=first-1, .end=ashed_buffer.count-1};
-            }
-        } else if (**line == ';') {
-            addr.type= ASHED_ADDR_RANGE;
-            addr.r = (Range){.begin=first-1, .end=ashed_buffer.count-1};
-            (*line)++;
+                else addr.r = (Range){.begin=first-1, .end=second-1};
+            } else addr.r = (Range){.begin=first-1, .end=ashed_buffer.count-1};
         } else { 
             if (first >= 1 && first <= ashed_buffer.count) {
                 addr.type= ASHED_ADDR_NUMBER;
                 addr.n = first;
-            } else addr.type = ASHED_ADDR_INVALID; // TODO: mettere un errore del tipo "out of range"
+            } else addr.type = ASHED_ADDR_INVALID;
         }
     }
 
@@ -282,6 +310,30 @@ void ashedAddress_print(AshedAddress addr)
         default:                 shlog(SHLOG_FATAL, "Unreachable: address print");   abort();
     }
     printf("\n");
+}
+
+static_assert(ASHED_CMDTYPES_COUNT == 14, "Exhaustive number of ashed commands in getAshedCmdType");
+AshedCmdType getAshedCmdType(char **line)
+{
+    AshedCmdType type;
+    bool need_to_advance = true;
+    if      (streq(*line, "c")) type = ASHED_CMD_CLEAR;
+    else if (streq(*line, "p")) type = ASHED_CMD_PRINT;
+    else if (streq(*line, "A")) type = ASHED_CMD_APPEND_MAJOR;
+    else if (streq(*line, "a")) type = ASHED_CMD_APPEND_MINOR;
+    else if (streq(*line, "I")) type = ASHED_CMD_INSERT_MAJOR;
+    else if (streq(*line, "i")) type = ASHED_CMD_INSERT_MINOR;
+    else if (streq(*line, "R")) type = ASHED_CMD_REPLACE_MAJOR;
+    else if (streq(*line, "r")) type = ASHED_CMD_REPLACE_MINOR;
+    else if (streq(*line, "d")) type = ASHED_CMD_DELETE;
+    else if (*line[0] == 'h')   type = ASHED_CMD_HELP;
+    else if (*line[0] == 'w')   type = ASHED_CMD_WRITE;
+    else if (*line[0] == 'q')   type = ASHED_CMD_QUIT;
+    else if (streq(*line, ""))  { type = ASHED_CMD_GOTO; need_to_advance = false; }
+    else                        type = ASHED_CMD_UNKNOWN;
+
+    if (need_to_advance) (*line)++;
+    return type;
 }
 
 void ashed_quit(int *code, char *line)
@@ -502,6 +554,8 @@ void ashed_help(int *code, char *line)
     if (streq(line, "h")) {
         printf(ASHED_USAGE);
         RETURN_CODE(0);
+    } else if (0) {
+             
     } else RETURN_CODE(1);
 }
 
@@ -549,25 +603,30 @@ int ashed_main(char *ashell_filename)
             line = remove_spaces(line);
             AshedAddress address = parseAddress(&line);
 
+            ashedAddress_print(address);
             if (EDDEBUG) {
-                ashedAddress_print(address);
                 printf("now parse command from `%s`\n", line);
             }
 
             if (address.type == ASHED_ADDR_INVALID) {
                 ashed_code = 1;
             } else {
-                if      (streq(line, "c")) ashed_clear(&ashed_code);
-                else if (streq(line, "p")) ashed_print(&ashed_code, address);
-                else if (streq(line, "a")) ashed_goto_append_mode(&ashed_code, &ashed_mode);
-                else if (streq(line, "i")) ashed_goto_insert_mode(&ashed_code, &ashed_mode, address);
-                else if (streq(line, "r")) ashed_goto_replace_mode(&ashed_code, &ashed_mode, address);
-                else if (streq(line, "d")) ashed_delete(&ashed_code, address);
-                else if (line[0] == 'h')   ashed_help(&ashed_code, line);
-                else if (line[0] == 'w')   ashed_write_file(&ashed_code, line);
-                else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
-                else if (streq(line, ""))  ashed_goto_line(&ashed_code, address);
-                else                       ashed_code = 1;
+                AshedCmdType cmd_type = getAshedCmdType(&line);
+                switch (cmd_type)
+                {
+                    // TODODODOODODODO
+                    if      (streq(line, "c")) ashed_clear(&ashed_code);
+                    else if (streq(line, "p")) ashed_print(&ashed_code, address);
+                    else if (streq(line, "a")) ashed_goto_append_mode(&ashed_code, &ashed_mode);
+                    else if (streq(line, "i")) ashed_goto_insert_mode(&ashed_code, &ashed_mode, address);
+                    else if (streq(line, "r")) ashed_goto_replace_mode(&ashed_code, &ashed_mode, address);
+                    else if (streq(line, "d")) ashed_delete(&ashed_code, address);
+                    else if (line[0] == 'h')   ashed_help(&ashed_code, line);
+                    else if (line[0] == 'w')   ashed_write_file(&ashed_code, line);
+                    else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
+                    else if (streq(line, ""))  ashed_goto_line(&ashed_code, address);
+                    else                       ashed_code = 1;
+                }
             }
 
             if      (ashed_code == -1) break;

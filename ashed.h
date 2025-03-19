@@ -61,6 +61,27 @@ typedef struct
     };
 } AshedAddress;
 
+typedef enum
+{
+    ASHED_CMD_UNKNOWN,
+    ASHED_CMD_HELP,
+    ASHED_CMD_PRINT,
+    ASHED_CMD_APPEND_MINOR,
+    ASHED_CMD_APPEND_MAJOR,
+    ASHED_CMD_INSERT_MINOR,
+    ASHED_CMD_INSERT_MAJOR,
+    ASHED_CMD_REPLACE_MINOR,
+    ASHED_CMD_REPLACE_MAJOR,
+    ASHED_CMD_DELETE,
+    ASHED_CMD_WRITE,
+    ASHED_CMD_GOTO,
+    ASHED_CMD_CLEAR,
+    ASHED_CMD_QUIT,
+    ASHED_CMDTYPES_COUNT 
+} AshedCmdType;
+
+AshedCmdType getAshedCmdType(char *line);
+
 void ashed_goto_command_mode(int *code, AshedMode *mode);
 void ashed_goto_append_mode(int *code, AshedMode *mode);
 void ashed_goto_replace_mode(int *code, AshedMode *mode, AshedAddress addr);
