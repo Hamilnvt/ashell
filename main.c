@@ -251,7 +251,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive usage for all commands");
 #define USAGE_QUIT        "quit (q)"
 #define USAGE_SIZE        "size (sz) [PATH | .]"
 #define USAGE_MKFL        "mkfl <FILE_PATH>"
-#define USAGE_ASHED        "ashed (shed or ed) [FILE_PATH | ./NEW]"
+#define USAGE_ASHED       "ashed (shed or ed) [FILE_PATH | ./temped#]"
 #define USAGE_FILE_WRITE  "> <FILE> [INPUT | stdin]"
 #define USAGE_FILE_APPEND ">> <FILE> [INPUT | stdin]"
 #define USAGE_DUMP        "dump (dp) <SRC> [[OPERATOR | >] [...DST]]"
@@ -275,7 +275,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive flags for all commands");
 #define FLAGS_QUIT        NO_FLAGS
 #define FLAGS_SIZE        NO_FLAGS
 #define FLAGS_MKFL        NO_FLAGS
-#define FLAGS_ASHED        NO_FLAGS
+#define FLAGS_ASHED       NO_FLAGS
 #define FLAGS_FILE_WRITE  NO_FLAGS
 #define FLAGS_FILE_APPEND NO_FLAGS
 #define FLAGS_DUMP        NO_FLAGS
@@ -294,7 +294,7 @@ static_assert(CMDTYPES_COUNT == 18+1, "Exhaustive doc string for all commands");
 #define DOC_QUIT        "Exit the shell safely."
 #define DOC_SIZE        "Print the size of PATH. If none, print the size of the current directory."
 #define DOC_MKFL        "Create the file at FILE_PATH."
-#define DOC_ASHED        "Open FILE_PATH with the builtin `ashed` text editor. If none open NEW, an empty unsaved file, in the working directory"
+#define DOC_ASHED       "Open FILE_PATH with the builtin `ashed` text editor. If none open temped#, an empty unsaved numbered (#) file, in the working directory"
 #define DOC_FILE_WRITE  "Write INPUT (default is stdin) to FILE. FILE will be overwritten."
 #define DOC_FILE_APPEND "Append INPUT (default is stdin) to FILE."
 #define DOC_DUMP        "Dump FILE: TODO..."
@@ -986,7 +986,7 @@ int main(void)
                 case CMD_SL:          exec_sl();                  break;
                 case CMD_SIZE:        exec_size(&command);        break;
                 case CMD_MKFL:        exec_mkfl(&command);        break;
-                case CMD_ASHED:        exec_ashed(&command);        break;
+                case CMD_ASHED:        exec_ashed(&command);      break;
                 case CMD_FILE_WRITE:  exec_file_write(&command);  break;
                 case CMD_FILE_APPEND: exec_file_write(&command);  break;
                 case CMD_DUMP:        exec_dump(&command);        break;

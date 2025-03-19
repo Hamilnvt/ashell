@@ -1,16 +1,8 @@
 /* TODO
    - swap files
-
-   - Line addresses command (da documentare):
-     - . (current line, default for everything)
-     - $ (last line)
-     - n (n-th line)
-     - +(n)
-     - -(n)
-     - , (first through last lines = 1,)
-     - ; (current through last lines)
-     - x,y (range)
-       > x, (or x, shortened or x;) and ,y will be valid ranges
+   - major and minor modes (differenziate da lettere maiuscole e minuscole)
+   - autosave (every n commands [newlines] inserted)
+   - colori per ogni mode
 
    - Comandi:
      - i (data la riga dell'address, la sposta giu' di 1 e comincia a scrivere in quella riga)
@@ -19,10 +11,10 @@
      - u (undo, dovrebbe essere molto difficile e forse devo anche enumerare i vari comandi, che comunque non sarebbe una cattiva idea)
      - m (move -> <addr>m<addr>)
      - x (mark, per poi tornarci, magari mettendo anche un identificativo)
+     - F/f (find)
 
    Urgent Stack:
    - problema con remove_newline, non aumenta la capacita' se trova una riga vuota (con solo '\n')
-   - documentare tutto [address | .]cmd
 
     https://www.gnu.org/software/ed/manual/ed_manual.html
     https://www.redhat.com/en/blog/introduction-ed-editor
@@ -505,6 +497,14 @@ void ashed_print_mode_prompt(char *prompt)
     printf("%s%d%s: ", prompt, current_line + 1, saved ? "" : "*");
 }
 
+void ashed_help(int *code, char *line)
+{
+    if (streq(line, "h")) {
+        printf(ASHED_USAGE);
+        RETURN_CODE(0);
+    } else RETURN_CODE(1);
+}
+
 int ashed_main(char *ashell_filename)
 {
     static int ashed_file_n = 0;
@@ -563,6 +563,7 @@ int ashed_main(char *ashell_filename)
                 else if (streq(line, "i")) ashed_goto_insert_mode(&ashed_code, &ashed_mode, address);
                 else if (streq(line, "r")) ashed_goto_replace_mode(&ashed_code, &ashed_mode, address);
                 else if (streq(line, "d")) ashed_delete(&ashed_code, address);
+                else if (line[0] == 'h')   ashed_help(&ashed_code, line);
                 else if (line[0] == 'w')   ashed_write_file(&ashed_code, line);
                 else if (line[0] == 'q')   ashed_quit(&ashed_code, line);
                 else if (streq(line, ""))  ashed_goto_line(&ashed_code, address);
