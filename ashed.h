@@ -4,7 +4,6 @@
 #include "ashell_utils.h"
 
 #define EDDEBUG 0
-#define RETURN_CODE(n) { *code = (n); return; }
 
 #define MAX_CHARS (8*1024)
 #define BUFFER_INITIAL_CAPACITY 8;
@@ -30,9 +29,12 @@ bool write_entire_file(char *path, const void *data, size_t size);
 typedef enum
 {    
     ASHED_MODE_COMMAND,
-    ASHED_MODE_APPEND,
-    ASHED_MODE_INSERT,
-    ASHED_MODE_REPLACE,
+    ASHED_MODE_APPEND_MAJOR,
+    ASHED_MODE_APPEND_MINOR,
+    ASHED_MODE_INSERT_MAJOR,
+    ASHED_MODE_INSERT_MINOR,
+    ASHED_MODE_REPLACE_MAJOR,
+    ASHED_MODE_REPLACE_MINOR,
 } AshedMode;
 
 typedef enum
@@ -66,12 +68,12 @@ typedef enum
     ASHED_CMD_UNKNOWN,
     ASHED_CMD_HELP,
     ASHED_CMD_PRINT,
-    ASHED_CMD_APPEND_MINOR,
     ASHED_CMD_APPEND_MAJOR,
-    ASHED_CMD_INSERT_MINOR,
+    ASHED_CMD_APPEND_MINOR,
     ASHED_CMD_INSERT_MAJOR,
-    ASHED_CMD_REPLACE_MINOR,
+    ASHED_CMD_INSERT_MINOR,
     ASHED_CMD_REPLACE_MAJOR,
+    ASHED_CMD_REPLACE_MINOR,
     ASHED_CMD_DELETE,
     ASHED_CMD_WRITE,
     ASHED_CMD_GOTO,
@@ -82,20 +84,36 @@ typedef enum
 
 AshedCmdType getAshedCmdType(char *line);
 
-void ashed_goto_command_mode(int *code, AshedMode *mode);
-void ashed_goto_append_mode(int *code, AshedMode *mode);
-void ashed_goto_replace_mode(int *code, AshedMode *mode, AshedAddress addr);
-void ashed_write_line(int *code, char *line);
-void ashed_write_file(int *code, char *line);
+typedef enum
+{
+    ASHED_CODE_OK,
+    ASHED_CODE_UNKNOWN_CMD,
+    ASHED_CODE_ERROR,
+    ASHED_CODE_QUIT,
+} AshedCode;
 
-void ashed_quit(int *code, char *line);
-void ashed_clear(int *code);
-void ashed_print(int *code, AshedAddress addr);
-void ashed_advance(int *code, AshedAddress addr);
-void ashed_retreat(int *code, AshedAddress addr);
-void ashed_replace_line(int *code, char *line);
-void ashed_insert_line(int *code, char *line);
-void ashed_delete(int *code, AshedAddress addr);
+// MODES
+int ashed_set_mode_command();
+int ashed_set_mode_append_major();
+int ashed_set_mode_append_minor();
+int ashed_set_mode_insert_major(AshedAddress addr);
+int ashed_set_mode_insert_minor(AshedAddress addr);
+int ashed_set_mode_replace_major(AshedAddress addr);
+int ashed_set_mode_replace_minor(AshedAddress addr);
+int ashed_set_mode_find_major(); // TODO
+int ashed_set_mode_find_minor();
+
+int ashed_write_line(char *line);
+int ashed_write_file(char *line);
+
+int ashed_quit(char *line);
+int ashed_clear();
+int ashed_print(AshedAddress addr);
+int ashed_advance(AshedAddress addr);
+int ashed_retreat(AshedAddress addr);
+int ashed_replace_line(char *line);
+int ashed_insert_line(char *line);
+int ashed_delete(AshedAddress addr);
 
 // ASHED DOCUMENTATION //////////////////// 
 #define ASHED_DOC   "ashed is a mode line oriented text editor inspired by GNU's `ed` (https://www.gnu.org/software/ed/) ...TODO"
