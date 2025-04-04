@@ -207,6 +207,21 @@ int parse_num_and_advance(char **str)
     return n;
 }
 
+char *getAshedModeColor(AshedMode mode)
+{
+    switch(mode)
+    {
+        case ASHED_MODE_COMMAND:       return ASHED_MODE_COLOR_COMMAND;
+        case ASHED_MODE_APPEND_MAJOR:  return ASHED_MODE_COLOR_APPEND_MAJOR;
+        case ASHED_MODE_APPEND_MINOR:  return ASHED_MODE_COLOR_APPEND_MINOR;
+        case ASHED_MODE_INSERT_MAJOR:  return ASHED_MODE_COLOR_INSERT_MAJOR;
+        case ASHED_MODE_INSERT_MINOR:  return ASHED_MODE_COLOR_INSERT_MINOR; 
+        case ASHED_MODE_REPLACE_MAJOR: return ASHED_MODE_COLOR_REPLACE_MAJOR; 
+        case ASHED_MODE_REPLACE_MINOR: return ASHED_MODE_COLOR_REPLACE_MINOR; 
+        default: shlog(SHLOG_FATAL, "Unreachable: get ashed mode color"); abort();
+    }
+}
+
 // TODO:
 // - funziona, ma c'e' troppo codice ripetuto aaaa, ma adesso non ho voglia di sistemarlo
 AshedAddress parseAddress(char **line)
@@ -362,7 +377,7 @@ void ashed_CmdType_print(AshedCmdType type)
     printf("\n");    
 }
 
-int ashed_quit(char *line)
+AshedCode ashed_quit(char *line)
 {
     if (line == NULL || strlen(line) == 0) {
         if (!saved) {
@@ -373,9 +388,9 @@ int ashed_quit(char *line)
     else return ASHED_CODE_UNKNOWN_CMD;
 }
 
-int ashed_clear() { printf("\e[1;1H\e[2J"); return ASHED_CODE_OK; }
+void ashed_clear() { printf("\e[1;1H\e[2J"); }
 
-int ashed_print(AshedAddress addr)
+void ashed_print(AshedAddress addr)
 {
     int line_to_print;
     bool print_single_line = true;
@@ -396,66 +411,54 @@ int ashed_print(AshedAddress addr)
     } else {
         buffer_print_range(ashed_buffer, addr.r);
     }
-    
-    return ASHED_CODE_OK;
 }
 
-int ashed_set_mode_command() { ashed_mode = ASHED_MODE_COMMAND; return ASHED_CODE_OK; }
+void ashed_set_mode_command() { ashed_mode = ASHED_MODE_COMMAND; }
 
 // TODO: perche' aumenta il buffer count?
-int ashed_set_mode_append_major() 
+void ashed_set_mode_append_major() 
 {
     ashed_mode = ASHED_MODE_APPEND_MAJOR;
     curr_line_n = ashed_buffer.count;
     ashed_buffer.count++;
-    return ASHED_CODE_OK;
 }
 
-int ashed_set_mode_append_minor()
-{
-    ashed_mode = ASHED_MODE_APPEND_MINOR;
-    return ASHED_CODE_OK;
-}
+void ashed_set_mode_append_minor() { ashed_mode = ASHED_MODE_APPEND_MINOR; }
 
-int ashed_set_mode_insert_major(AshedAddress addr) 
+void ashed_set_mode_insert_major(AshedAddress addr) 
 {
     ashed_mode = ASHED_MODE_INSERT_MAJOR;
     saved_addr = malloc(sizeof(AshedAddress));
     *saved_addr = addr;
-    return ASHED_CODE_OK;
 }
 
-int ashed_set_mode_insert_minor(AshedAddress addr)
+void ashed_set_mode_insert_minor(AshedAddress addr)
 {
     (void)addr;
     ashed_mode = ASHED_MODE_INSERT_MINOR;
-    return ASHED_CODE_OK;
 }
 
-int ashed_set_mode_replace_major(AshedAddress addr) 
+void ashed_set_mode_replace_major(AshedAddress addr) 
 {
     ashed_mode = ASHED_MODE_REPLACE_MAJOR;
     saved_addr = malloc(sizeof(AshedAddress));
     *saved_addr = addr;
-    return ASHED_CODE_OK;
 }
 
-int ashed_set_mode_replace_minor(AshedAddress addr)
+void ashed_set_mode_replace_minor(AshedAddress addr)
 {
     (void) addr;
     ashed_mode = ASHED_MODE_REPLACE_MINOR;
-    return ASHED_CODE_OK;
 }
 
-int ashed_write_line(char *line)
+void ashed_write_line(char *line)
 {
     buffer_write_line(&ashed_buffer, line, curr_line_n);
     curr_line_n++;
     saved = false;
-    return ASHED_CODE_OK;
 }
 
-int ashed_write_file(char *line)
+AshedCode ashed_write_file(char *line)
 {
     bool save_and_quit = false;
     bool save_on_different_file = false;
@@ -467,7 +470,7 @@ int ashed_write_file(char *line)
             line = remove_spaces(line);
             sprintf(filename, line);
             save_on_different_file = true;
-        } else return 1;
+        } else return ASHED_CODE_UNKNOWN_CMD; // TODO shlog error
     }
 
     char blob[ashed_buffer.count*(MAX_CHARS+1)];
@@ -493,35 +496,38 @@ int ashed_write_file(char *line)
     return ASHED_CODE_OK;
 }
 
-int ashed_goto_line(AshedAddress addr)
+void ashed_goto_line(AshedAddress addr)
 {
     switch(addr.type)
     {
         case ASHED_ADDR_CURRENT:                                                    break;
-        case ASHED_ADDR_LAST:    curr_line_n = ashed_buffer.count-1;               break;
-        case ASHED_ADDR_NUMBER:  curr_line_n =  addr.n - 1;                        break;
-        case ASHED_ADDR_NEXT:    curr_line_n += addr.n;                            break;
-        case ASHED_ADDR_PREV:    curr_line_n -= addr.n;                            break; 
+        case ASHED_ADDR_LAST:    curr_line_n = ashed_buffer.count-1;                break;
+        case ASHED_ADDR_NUMBER:  curr_line_n =  addr.n - 1;                         break;
+        case ASHED_ADDR_NEXT:    curr_line_n += addr.n;                             break;
+        case ASHED_ADDR_PREV:    curr_line_n -= addr.n;                             break; 
         case ASHED_ADDR_RANGE:   shlog(SHLOG_WARNING, "Range alone has no effect"); break;
         case ASHED_ADDR_INVALID:
         default:                 shlog(SHLOG_FATAL, "Unreachable: goto line");      abort();
     }
-    if (addr.type != ASHED_ADDR_RANGE)
-        buffer_print_line(ashed_buffer, curr_line_n);
-    return ASHED_CODE_OK;
+    if (addr.type != ASHED_ADDR_RANGE) buffer_print_line(ashed_buffer, curr_line_n);
 }
 
-int ashed_insert_line(char *line_str)
+void ashed_append_line(char *line_str)
+{
+    shlog(SHLOG_TODO, "Append line `%s`", line_str);
+}
+
+void ashed_insert_line(char *line_str)
 {
     int line_n;
     switch(saved_addr->type)
     {
         case ASHED_ADDR_CURRENT: line_n = curr_line_n;                          break;
-        case ASHED_ADDR_LAST:    line_n = ashed_buffer.count-1;                  break;
-        case ASHED_ADDR_NUMBER:  line_n = saved_addr->n - 1;                     break;
+        case ASHED_ADDR_LAST:    line_n = ashed_buffer.count-1;                 break;
+        case ASHED_ADDR_NUMBER:  line_n = saved_addr->n - 1;                    break;
         case ASHED_ADDR_NEXT:    line_n = curr_line_n + saved_addr->n;          break; 
         case ASHED_ADDR_PREV:    line_n = curr_line_n - saved_addr->n;          break; 
-        case ASHED_ADDR_RANGE:   { shlog(SHLOG_WARNING, "Cannot insert a range"); return 1; }
+        case ASHED_ADDR_RANGE:   { shlog(SHLOG_ERROR, "Cannot insert in a range"); return; }
         case ASHED_ADDR_INVALID:
         default:                 shlog(SHLOG_FATAL, "Unreachable: insert line"); abort();
     }
@@ -532,21 +538,20 @@ int ashed_insert_line(char *line_str)
     saved_addr->type = ASHED_ADDR_NEXT;
     saved_addr->n = 1;
     curr_line_n++;
-    return ASHED_CODE_OK;
 }
 
 // TODO: replace range cancella tutte le righe del range e ne riscrive solamente una
-int ashed_replace_line(char *line_str)
+void ashed_replace_line(char *line_str)
 {
     int line_n;
     switch(saved_addr->type)
     {
         case ASHED_ADDR_CURRENT: line_n = curr_line_n;                          break;
-        case ASHED_ADDR_LAST:    line_n = ashed_buffer.count-1;                  break;
-        case ASHED_ADDR_NUMBER:  line_n = saved_addr->n - 1;                     break;
+        case ASHED_ADDR_LAST:    line_n = ashed_buffer.count-1;                 break;
+        case ASHED_ADDR_NUMBER:  line_n = saved_addr->n - 1;                    break;
         case ASHED_ADDR_NEXT:    line_n = curr_line_n + saved_addr->n;          break; 
         case ASHED_ADDR_PREV:    line_n = curr_line_n - saved_addr->n;          break; 
-        case ASHED_ADDR_RANGE:   { shlog(SHLOG_WARNING, "Cannot replace a range"); return 1; } // TODO: in realta' si puo'
+        case ASHED_ADDR_RANGE:   { shlog(SHLOG_TODO, "Replace range"); return ; }
         case ASHED_ADDR_INVALID:
         default:                 shlog(SHLOG_FATAL, "Unreachable: replace line"); abort();
     }
@@ -555,10 +560,9 @@ int ashed_replace_line(char *line_str)
 
     free(saved_addr);
     saved_addr = NULL;
-    return ASHED_CODE_OK;
 }
 
-int ashed_delete(AshedAddress addr)
+void ashed_delete(AshedAddress addr)
 {
     int line_n;
     bool delete_single_line = true;
@@ -586,14 +590,13 @@ int ashed_delete(AshedAddress addr)
         curr_line_n--;
 
     saved = false;
-    return ASHED_CODE_OK;
 }
 
-int ashed_help(char *line)
+void ashed_help(char *line)
 {
     if (strlen(line) == 0) {
         printf(ASHED_USAGE);
-        return ASHED_CODE_OK;
+        return;
     }
     AshedCmdType help_type = getAshedCmdType(line);
     if (help_type == ASHED_CMD_UNKNOWN) {
@@ -603,12 +606,13 @@ int ashed_help(char *line)
         shlog(SHLOG_TODO, "Get help for");
         ashed_CmdType_print(help_type);
     }
-    return ASHED_CODE_OK;
 }
 
 void ashed_print_mode_prompt(char *prompt)
 {
-    printf("%s%d%s: ", prompt, curr_line_n + 1, saved ? "" : "*");
+    char mode_prompt_buf[128];
+    sprintf(mode_prompt_buf, "[%s%s%d] ", saved ? "-" : "+", prompt, curr_line_n + 1);
+    print_fg_text(mode_prompt_buf, getAshedModeColor(ashed_mode));
 }
 
 int ashed_main(char *ashell_filename)
@@ -672,20 +676,20 @@ int ashed_main(char *ashell_filename)
                         ashed_CmdType_print(ashed_cmd_type);
                         switch (ashed_cmd_type)
                         {
-                            case ASHED_CMD_UNKNOWN:       ashed_code = 1;                                     break;
-                            case ASHED_CMD_HELP:          ashed_code = ashed_help(line);                      break;
-                            case ASHED_CMD_PRINT:         ashed_code = ashed_print(address);                  break;
-                            case ASHED_CMD_APPEND_MAJOR:  ashed_code = ashed_set_mode_append_major();         break;
-                            case ASHED_CMD_APPEND_MINOR:  ashed_code = ashed_set_mode_append_minor();         break;
-                            case ASHED_CMD_INSERT_MAJOR:  ashed_code = ashed_set_mode_insert_major(address);  break;
-                            case ASHED_CMD_INSERT_MINOR:  ashed_code = ashed_set_mode_insert_minor(address);  break;
-                            case ASHED_CMD_REPLACE_MAJOR: ashed_code = ashed_set_mode_replace_major(address); break;
-                            case ASHED_CMD_REPLACE_MINOR: ashed_code = ashed_set_mode_replace_minor(address); break;
-                            case ASHED_CMD_DELETE:        ashed_code = ashed_delete(address);                 break;
+                            case ASHED_CMD_HELP:                       ashed_help(line);                      break;
+                            case ASHED_CMD_PRINT:                      ashed_print(address);                  break;
+                            case ASHED_CMD_APPEND_MAJOR:               ashed_set_mode_append_major();         break;
+                            case ASHED_CMD_APPEND_MINOR:               ashed_set_mode_append_minor();         break;
+                            case ASHED_CMD_INSERT_MAJOR:               ashed_set_mode_insert_major(address);  break;
+                            case ASHED_CMD_INSERT_MINOR:               ashed_set_mode_insert_minor(address);  break;
+                            case ASHED_CMD_REPLACE_MAJOR:              ashed_set_mode_replace_major(address); break;
+                            case ASHED_CMD_REPLACE_MINOR:              ashed_set_mode_replace_minor(address); break;
+                            case ASHED_CMD_DELETE:                     ashed_delete(address);                 break;
+                            case ASHED_CMD_GOTO:                       ashed_goto_line(address);              break;
+                            case ASHED_CMD_CLEAR:                      ashed_clear();                         break;
                             case ASHED_CMD_WRITE:         ashed_code = ashed_write_file(line);                break;
-                            case ASHED_CMD_GOTO:          ashed_code = ashed_goto_line(address);              break;
-                            case ASHED_CMD_CLEAR:         ashed_code = ashed_clear();                         break;
                             case ASHED_CMD_QUIT:          ashed_code = ashed_quit(line);                      break;
+                            case ASHED_CMD_UNKNOWN:       ashed_code = ASHED_CODE_UNKNOWN_CMD;                break;
                             case ASHED_CMDTYPES_COUNT:
                             default: shlog(SHLOG_FATAL, "Unreachable: ashed command type");                   abort();
                         }
@@ -696,15 +700,16 @@ int ashed_main(char *ashell_filename)
                 {
                     if (streq(line, ".")) {
                         curr_line_n--;
-                        ashed_code = ashed_set_mode_command();
+                        ashed_set_mode_command();
                     }
-                    else ashed_code = ashed_write_line(line);
+                    else ashed_write_line(line);
                 } break;
 
             case ASHED_MODE_APPEND_MINOR:
                 {
                     shlog(SHLOG_TODO, "append minor mode");
-                    ashed_code = ashed_set_mode_command();
+                    if (!streq(line, ".")) ashed_append_line(line);
+                    ashed_set_mode_command();
                 } break;
 
             case ASHED_MODE_INSERT_MAJOR:
@@ -716,16 +721,16 @@ int ashed_main(char *ashell_filename)
                     if (streq(line, ".")) {
                         free(saved_addr);
                         saved_addr = NULL;
-                        ashed_code = ashed_set_mode_command();
+                        ashed_set_mode_command();
                     } else {
-                        ashed_code = ashed_insert_line(line);
+                        ashed_insert_line(line);
                     }
                 } break;
 
             case ASHED_MODE_INSERT_MINOR:
                 {
                     shlog(SHLOG_TODO, "insert minor mode");
-                    ashed_code = ashed_set_mode_command();
+                    ashed_set_mode_command();
                 } break;
 
             case ASHED_MODE_REPLACE_MAJOR:
@@ -738,15 +743,15 @@ int ashed_main(char *ashell_filename)
                         free(saved_addr);
                         saved_addr = NULL;
                     } else {
-                        ashed_code = ashed_replace_line(line);
+                        ashed_replace_line(line);
                     }
-                    ashed_code = ashed_set_mode_command();
+                    ashed_set_mode_command();
                 } break;
 
             case ASHED_MODE_REPLACE_MINOR:
                 {
                     shlog(SHLOG_TODO, "replace minor mode");
-                    ashed_code = ashed_set_mode_command();
+                    ashed_set_mode_command();
                 } break;
 
             default:

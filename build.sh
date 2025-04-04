@@ -2,11 +2,15 @@
 
 SRC_FOLDER=~/Coding/C/shell/
 
-echo "Compiling..."
+echo "[BUILD] Compiling..."
 cc -o ashell "$SRC_FOLDER"main.c "$SRC_FOLDER"ashed.c "$SRC_FOLDER"ashell_utils.c -lm -Wall -Wextra -Wswitch-enum
 
-echo "Executing..."
+echo "[BUILD] Executing..."
 ./ashell
 
-echo "Removing executable..."
-rm ashell
+#if [[ -f "ashell" ]] then
+#    echo "[BUILD] Removing executable..."
+#    rm ashell
+#fi
+
+echo "[BUILD] done"

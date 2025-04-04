@@ -231,13 +231,10 @@ void aos_init(ArrayOfStrings *aos, unsigned int size)
         abort();
     }
     aos->items = malloc(size*sizeof(char *));
+    for (unsigned int i = 0; i < size; i++)
+        aos->items[i] = NULL;
     aos->count = size;
 }
 
-void aos_free(ArrayOfStrings *aos)
-{
-    for (int i = 0; i < aos->count; i++)
-        free(aos->items[i]);
-    free(aos->items);
-}
+inline void aos_free(ArrayOfStrings *aos) { if (aos != NULL && aos->items != NULL) free(aos->items); }
 //////////////////////////////////////////////////

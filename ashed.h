@@ -37,6 +37,16 @@ typedef enum
     ASHED_MODE_REPLACE_MINOR,
 } AshedMode;
 
+#define ASHED_MODE_COLOR_COMMAND       WHITE
+#define ASHED_MODE_COLOR_APPEND_MAJOR  "50;150;255"
+#define ASHED_MODE_COLOR_APPEND_MINOR  ASHED_MODE_COLOR_APPEND_MAJOR
+#define ASHED_MODE_COLOR_INSERT_MAJOR  "100;255;100"
+#define ASHED_MODE_COLOR_INSERT_MINOR  ASHED_MODE_COLOR_INSERT_MAJOR
+#define ASHED_MODE_COLOR_REPLACE_MAJOR "255;100;100"
+#define ASHED_MODE_COLOR_REPLACE_MINOR ASHED_MODE_COLOR_REPLACE_MAJOR
+
+char *getAshedModeColor(AshedMode mode);
+
 typedef enum
 {
     ASHED_ADDR_INVALID = -1,
@@ -93,27 +103,29 @@ typedef enum
 } AshedCode;
 
 // MODES
-int ashed_set_mode_command();
-int ashed_set_mode_append_major();
-int ashed_set_mode_append_minor();
-int ashed_set_mode_insert_major(AshedAddress addr);
-int ashed_set_mode_insert_minor(AshedAddress addr);
-int ashed_set_mode_replace_major(AshedAddress addr);
-int ashed_set_mode_replace_minor(AshedAddress addr);
-int ashed_set_mode_find_major(); // TODO
-int ashed_set_mode_find_minor();
+void ashed_set_mode_command();
+void ashed_set_mode_append_major();
+void ashed_set_mode_append_minor();
+void ashed_set_mode_insert_major(AshedAddress addr);
+void ashed_set_mode_insert_minor(AshedAddress addr);
+void ashed_set_mode_replace_major(AshedAddress addr);
+void ashed_set_mode_replace_minor(AshedAddress addr);
+void ashed_set_mode_find_major(); // TODO
+void ashed_set_mode_find_minor();
 
-int ashed_write_line(char *line);
-int ashed_write_file(char *line);
+void ashed_write_line(char *line);
+AshedCode ashed_write_file(char *line);
 
-int ashed_quit(char *line);
-int ashed_clear();
-int ashed_print(AshedAddress addr);
-int ashed_advance(AshedAddress addr);
-int ashed_retreat(AshedAddress addr);
-int ashed_replace_line(char *line);
-int ashed_insert_line(char *line);
-int ashed_delete(AshedAddress addr);
+AshedCode ashed_quit(char *line);
+void ashed_clear();
+void ashed_print(AshedAddress addr);
+AshedCode ashed_advance(AshedAddress addr);
+AshedCode ashed_retreat(AshedAddress addr);
+
+void ashed_insert_line(char *line);
+void ashed_append_line(char *line);
+void ashed_replace_line(char *line);
+void ashed_delete(AshedAddress addr);
 
 // ASHED DOCUMENTATION //////////////////// 
 #define ASHED_DOC   "ashed is a mode line oriented text editor inspired by GNU's `ed` (https://www.gnu.org/software/ed/) ...TODO"
