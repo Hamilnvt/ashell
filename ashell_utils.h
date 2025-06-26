@@ -82,21 +82,9 @@ void shlog_file_does_not_exist(char *file_name);
 //////////////////////////////////////////////////
 
 /// Checking macros  //////////////////// 
-#define CHECK_TOO_MANY_ARGUMENTS(cmd, max) \
-    do { \
-        if ((cmd).argc > (max)) { \
-            shlog_too_many_arguments((cmd).name); \
-            return 1; \
-        } \
-    } while (0)
-
-#define CHECK_TOO_FEW_ARGUMENTS(cmd, min) \
-    do { \
-        if ((cmd).argc < (min)) { \
-            shlog_too_few_arguments((cmd).name); \
-            return 1; \
-        } \
-    } while (0)
+#define CHECK_TOO_MANY_ARGUMENTS(cmd, max) if ((cmd).argc > (max)) { shlog_too_many_arguments((cmd).name); return 1; }
+#define CHECK_TOO_FEW_ARGUMENTS(cmd, min)  if ((cmd).argc < (min)) { shlog_too_few_arguments((cmd).name);  return 1; }
+#define CHECK_NOT_EXACT_ARGUMENTS(cmd, exact)  if ((cmd).argc != (exact)) { shlog_too_few_arguments((cmd).name);  return 1; }
 /////////////////////////////////////////
 
 // ARRAY OF STRINGS /////////////////////

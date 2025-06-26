@@ -5,11 +5,14 @@
     - !v verbose external command
 
     Urgent stack:
+    - sistemare: ho introdotto i da e adesso e' tutto diverso, ma sara' molto piu' facile rispetto a prima
     - supporto per ~ ovunque
     - ? coda dei errno, oppure ogni controllo stampa gia' l'errore e non devo preoccuparmene, pero' devo decidere
     - aggiustare i segnali
+    - passare il puntatore a Command a tutte le funzioni?
 
     Altre cose da fare:
+    - fare in modo che i comandi, almeno quelli esterni e quelli piu' ciccioni (editor, ecc...) vengano lanciati con fork
     - usare ctrl+D per terminare la lettura da stdin
     - creare una cartella trash in cui vanno le cose eliminate con rm
     - permissions (mostrarle in ls, anche con colori diversi dei file; se si vuole eseguire un'operazione per cui non si hanno i permessi bisogna segnalarlo all'utente)
@@ -31,9 +34,10 @@
 #include <sys/resource.h>
 #include <dirent.h>
 
+#include "../strings/strings.c"
 #include "ashed.h"
 
-#define SHDEBUG false
+#define SHDEBUG true
 
 typedef enum
 {
@@ -95,8 +99,8 @@ void Start()
     //test_shlog_levels();
 
     struct sigaction sigint_action = { .sa_handler = sigint_handler };
-    sigaction(SIGINT, &sigint_action, NULL);
-    sigaction(SIGQUIT, NULL, NULL);
+    sigaction(SIGINT, &sigint_action, NULL); // CTRL+C
+    sigaction(SIGQUIT, NULL, NULL); // CTRL+D
 }
 
 typedef enum
@@ -123,24 +127,31 @@ typedef enum
     CMD_EXTERNAL,
     CMDTYPES_COUNT 
 } CmdType;
-static_assert(CMD_UNKNOWN==0 && CMD_DOC==1 && CMD_ECHO==2 && CMD_LS==3 && CMD_CD==4 && CMD_PWD==5 && CMD_MKDIR==6 && CMD_RM==7 && CMD_QUIT==8 && CMD_CLEAR==9 && CMD_SL==10 &&
-              CMD_SIZE==11 && CMD_MKFL==12 && CMD_ASHED==13 && CMD_FILE_WRITE == 14 && CMD_FILE_APPEND == 15 && CMD_DUMP==16 && CMD_MOVE==17 && CMD_RENAME==18 && CMD_EXTERNAL==19 && CMDTYPES_COUNT==20, "Order of commands is preserved"); 
+static_assert(CMD_UNKNOWN==0 && CMD_DOC==1 && CMD_ECHO==2 && CMD_LS==3 && CMD_CD==4 && CMD_PWD==5 && CMD_MKDIR==6 && CMD_RM==7 && CMD_QUIT==8 && CMD_CLEAR==9 && CMD_SL==10 && CMD_SIZE==11 && CMD_MKFL==12 && CMD_ASHED==13 && CMD_FILE_WRITE == 14 && CMD_FILE_APPEND == 15 && CMD_DUMP==16 && CMD_MOVE==17 && CMD_RENAME==18 && CMD_EXTERNAL==19 && CMDTYPES_COUNT==20, "Order of commands is preserved"); 
+
+da_decl(String, Strings);
 
 typedef struct
 {
     CmdType type;
     char *name;
-    int argc;
-    ArrayOfStrings argv;
-    int flagc;
-    ArrayOfStrings flagv;
+    size_t argc;
+    char **argv;
+    size_t flagc;
+    char **flagv;
 } Command;
 
 void cmd_free(Command *cmd)
 {
-    if (cmd->argc > 0) aos_free(&(cmd->argv));
-    if (cmd->flagc > 0) aos_free(&(cmd->flagv));
     free(cmd->name);
+    for (size_t i = 0; i < cmd->argc; i++) {
+        free(cmd->argv[i]);
+    }
+    free(cmd->argv);
+    for (size_t i = 0; i < cmd->flagc; i++) {
+        free(cmd->flagv[i]);
+    }
+    free(cmd->flagv);
 }
 
 void cmd_print(Command cmd)
@@ -151,10 +162,8 @@ void cmd_print(Command cmd)
     if (cmd.argc == 0) shlog(SHLOG_DEBUG, "  argv = [],");
     else  {
         shlog_NO_NEWLINE(SHLOG_DEBUG, "  argv = [ ");
-        for (int i = 0; i < cmd.argc; i++) {
-            char *arg = cmd.argv.items[i];
-            if (arg != NULL) printf(arg);
-            else printf("(null)");
+        for (size_t i = 0; i < cmd.argc; i++) {
+            printf("%s", cmd.argv[i]);
             if (i != cmd.argc - 1) printf(", ");
         }
         printf(" ]\n");
@@ -163,8 +172,8 @@ void cmd_print(Command cmd)
     if (cmd.flagc == 0) shlog(SHLOG_DEBUG, "  flagv = []");
     else {
         shlog_NO_NEWLINE(SHLOG_DEBUG, "  flagv = [ ");
-        for (int i = 0; i < cmd.flagc; i++) {
-            printf(cmd.flagv.items[i]);
+        for (size_t i = 0; i < cmd.flagc; i++) {
+            printf(cmd.flagv[i]);
             if (i != cmd.flagc - 1) printf(", ");
         }
         printf(" ]\n");
@@ -172,9 +181,9 @@ void cmd_print(Command cmd)
     shlog(SHLOG_DEBUG, "}");
 }
 
-CmdType getCmdType(char *name)
+CmdType cmd_get_type(char *name)
 {
-    static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive parsed command types in getCmdType");
+    static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive parsed command types in cmd_get_type");
     if      (streq(name, "doc"))                                                 return CMD_DOC;
     if      (streq(name, "echo"))                                                return CMD_ECHO;
     else if (streq(name, "quit")  || streq(name, "q"))                           return CMD_QUIT;
@@ -197,62 +206,134 @@ CmdType getCmdType(char *name)
     else                                                                         return CMD_UNKNOWN;
 }
 
-bool words_to_command(ArrayOfStrings words, Command *cmd)
+// TODO: si puo' fare meglio con strtok e facendo la differenza tra i puntatori per determinare la lunghezza
+bool cmd_parse(Command *cmd, char *line)
 {
-    if (words.count == 0) {
-        shlog(SHLOG_FATAL, "no command provided");
-        return false;
-    }
-
-    cmd->name = strdup(words.items[0]);
-    cmd->type = getCmdType(words.items[0]);
-    if (cmd->type == CMD_UNKNOWN) {
-        shlog_unknown_command(cmd->name);
-        return false;
-    }
-
-    if (cmd->type != CMD_EXTERNAL) {
-        int argc = 0;
-        int flagc = 0;
-        for (int i = 1; i < words.count; i++) {
-            if (words.items[i][0] == '-') flagc++;
-            else argc++;
+    if (line == NULL) return false;
+    size_t argc = 0;
+    Strings argv = {0};
+    da_default(&argv);
+    size_t flagc = 0;
+    Strings flagv = {0};
+    da_default(&flagv);
+    String current = {0};
+    da_default(&current);
+    while (isspace(*line)) line++;
+    size_t i = 0;
+    size_t len = strlen(line);
+    bool is_name = true;
+    bool is_flag = false;
+    bool external = false;
+    while(i < len) {
+        if (is_name) {
+            // TODO: controllare se il primo carattere e' una lettera?
+            while(!isspace(line[i]) || line[i] == '\0') {
+                s_push(&current, line[i]);
+                i++;
+            }
+            s_push_null(&current);
+            cmd->name = calloc(sizeof(char), current.count);
+            s_to_cstr(current, &cmd->name);
+            cmd->type = cmd_get_type(cmd->name);
+            if (cmd->type == CMD_UNKNOWN) {
+                shlog_unknown_command(cmd->name);
+                free(cmd->name);
+                return false;
+            } else if (cmd->type == CMD_EXTERNAL) external = true;
+            is_name = false;
+        } else {
+            if (line[i] == '-') {
+                is_flag = true;
+                i++;
+            } else {
+                is_flag = false;
+            }
+            while(!isspace(line[i]) || line[i] == '\0') {
+                s_push(&current, line[i]);
+                i++;
+            }
+            s_push_null(&current);
+            if (is_flag) {
+                flagc++;    
+                da_push(&flagv, s_clone(current));
+            } else {
+                argc++;
+                da_push(&argv, s_clone(current));
+            }
         }
+        s_clear(&current);
+        while (isspace(line[i])) i++;
+    }
+    s_free(&current);
 
+    if (!external) {
         cmd->argc = argc;
-        if (argc > 0) aos_init(&(cmd->argv), argc);
-        int arg_i = 0;
+        cmd->argv = calloc(sizeof(char *), argc);
+        for (size_t i = 0; i < argc; i++) {
+            cmd->argv[i] = calloc(sizeof(char), argv.items[i].count);
+            s_to_cstr(argv.items[i], &cmd->argv[i]);
+            s_free(&argv.items[i]);
+        }
+        da_free(&argv);
 
         cmd->flagc = flagc;
-        if (flagc > 0) aos_init(&(cmd->flagv), flagc);
-        int flag_i = 0;
-
-        int word_i = 1;
-        while (word_i <= argc + flagc) {
-            char *word = words.items[word_i];
-            if (SHDEBUG) shlog(SHLOG_DEBUG, "%d: %s", word_i, word);
-            if (word[0] == '-') {
-                cmd->flagv.items[flag_i] = strdup(word);
-                flag_i++;
-            } else {
-                cmd->argv.items[arg_i] = strdup(word);
-                arg_i++;
-            }
-            word_i++;
+        cmd->flagv = calloc(sizeof(char *), flagc);
+        for (size_t i = 0; i < flagc; i++) {
+            cmd->flagv[i] = calloc(sizeof(char), flagv.items[i].count);
+            s_to_cstr(flagv.items[i], &cmd->flagv[i]);
+            s_free(&flagv.items[i]);
         }
+        da_free(&flagv);
     } else {
-        cmd->argc = words.count;
-        aos_init(&(cmd->argv), words.count);
-        for (int i = 1; i < words.count; i++) {
-            cmd->argv.items[i-1] = words.items[i];    
-        }
-        cmd->argv.items[words.count-1] = NULL;
+        // TODO: probabilmente devo ricopiare words_to_command, quindi devo prima dividere in words e poi da li' fare il resto
     }
-
-    if (SHDEBUG) cmd_print(*cmd);
-
     return true;
 }
+
+// TODO: cambiare tutto: words non esistera piu' e questa cosa verra' fatta direttamente. Se si legge '-' si appende a flagv una nuova String, altrimenti a argv e si continuano ad aggiungere caratteri fino a che non si incontra isspace
+//bool words_to_command(ArrayOfStrings words, Command *cmd)
+//{
+//    if (words.count == 0) {
+//        shlog(SHLOG_FATAL, "no command provided");
+//        return false;
+//    }
+//
+//    cmd->name = s_from_cstr(words.items[0]);
+//    cmd->type = cmd_get_type(cmd->name);
+//    if (cmd->type == CMD_UNKNOWN) {
+//        shlog_unknown_command(cmd->name);
+//        return false;
+//    }
+//
+//    if (cmd->type != CMD_EXTERNAL) {
+//        int argc = 0;
+//        int flagc = 0;
+//
+//        for (int i = 1; i <= words.count; i++) {
+//            char *word = words.items[word_i];
+//            if (SHDEBUG) shlog(SHLOG_DEBUG, "%d: %s", word_i, word);
+//            if (word[0] == '-') {
+//                s_push_cstr(&cmd->flagv.items[flag_i] = strdup(word);
+//                flag_i++;
+//            } else {
+//                cmd->argv.items[arg_i] = strdup(word);
+//                arg_i++;
+//            }
+//            word_i++;
+//        }
+//    } else {
+//        cmd->argc = words.count;
+//        cmd->flagc = 0;
+//        for (int i = 1; i < words.count; i++) {
+//            da_push(&cmd->argv, words.items[i]);
+//        }
+//        // TODO: funzione che data una Strings costruisce il char** da passare a execvp
+//    }
+//
+//    cmd_print(*cmd);
+//
+//    return true;
+//}
 
 // Usage, flags and doc ///////////////////////////
 static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive usage for all commands");
@@ -270,7 +351,7 @@ static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive usage for all commands");
 #define USAGE_ASHED       "ashed (shed or ed) [FILE_PATH | ./temped#]"
 #define USAGE_FILE_WRITE  "> <FILE> [INPUT | stdin]"
 #define USAGE_FILE_APPEND ">> <FILE> [INPUT | stdin]"
-#define USAGE_DUMP        "dump (dp) <SRC> [[OPERATOR | >] [...DST]]"
+#define USAGE_DUMP        "dump (dp) <SRC> [[OPERATOR | >] [...DST]]" // TODO: describe operators
 #define USAGE_MOVE        "move (mv) <OLD_PATH> <NEW_PATH>"
 #define USAGE_RENAME      "rename (rn) <PATH/TO/OLD/NAME> <NEW_NAME>"
 #define USAGE_EXTERNAL    "! <CMD>"
@@ -325,7 +406,7 @@ static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive documentation");
              "Syntax:\n "\
              "    Command usage uses the following syntax:\n"\
              "    - some\t\tsome is a simple name, can be anything and is often the name of the command at the beginning of the usage.\n"\
-             "    - (some)\t\tis an alternative, often shorter, version of a command. e.g. clear (c) means `clear` and `c` will execute the same command.\n"\
+             "    - (some)\t\tis an alternative version of a command, often shorter (e.g. clear (c) means `clear` and `c` will execute the same command).\n"\
              "    - <some>\t\tsome in <> is mandatory.\n"\
              "    - [some | default]\t\tsome in [] is optional, if not specified it will take the default value.\n"\
              "    - ...some\t\tsome is a list (e.g. [...args] is an optional list of arguments)\n"\
@@ -342,7 +423,7 @@ static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive documentation");
              "    - Flags with no arguments:        -flag\n"\
              "    - Flags with one argument:        -flag=arg\n"\
              "    - Flags with more arguments:      -flag=arg1,arg2\n"\
-             "    - Flags arguments can have flags: -flag=[arg1 -f1,arg2 -f2]"\
+             "    - Flags arguments can have flags: -flag=[arg1-f1,arg2-f2]"\
      )
 
 static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive commands list");
@@ -373,7 +454,7 @@ static_assert(CMDTYPES_COUNT == 19+1, "Exhaustive commands list");
                     "  Quitting out of the shell:\n"\
                     "------------------------------------------------------------------------------------------------------\n"\
                     "  - quit    \t" DOC_QUIT  "\n"\
-                    "  - `ctrl+D`\tExit the shell with a SIGQUIT.\n"\
+                    "  - `CTRL+D`\tExit the shell with a SIGQUIT.\n"\
                     "------------------------------------------------------------------------------------------------------"\
         )
 typedef struct
@@ -421,18 +502,18 @@ int exec_doc(Command cmd)
 
     int doc_flags = cmd.flagc == 0 ? DOC_FLAG_ALL : 0;
 
-    for (int i = 0; i < cmd.flagc; i++) {
-        char *flag = cmd.flagv.items[i];
-        if (streq(flag, "-d")) doc_flags |= DOC_FLAG_DOC; 
+    for (size_t i = 0; i < cmd.flagc; i++) {
+        char *flag = cmd.flagv[i];
+        if (streq(flag, "d")) doc_flags |= DOC_FLAG_DOC; 
         else if (cmd.argc == 0) {
-            if (streq(flag, "-c")) doc_flags |= DOC_FLAG_CMDS; 
+            if (streq(flag, "c")) doc_flags |= DOC_FLAG_CMDS; 
             else {
                 shlog_unknown_flag(flag, cmd.name);
                 return 1;
             }
         } else {
-            if      (streq(flag, "-u")) doc_flags |= DOC_FLAG_USAGE;
-            else if (streq(flag, "-f")) doc_flags |= DOC_FLAG_FLAGS;
+            if      (streq(flag, "u")) doc_flags |= DOC_FLAG_USAGE;
+            else if (streq(flag, "f")) doc_flags |= DOC_FLAG_FLAGS;
             else {
                 shlog_unknown_flag_for_single_arg(flag, cmd.name);
                 return 1;
@@ -445,8 +526,8 @@ int exec_doc(Command cmd)
         if (doc_flags & (~DOC_FLAG_DOC & ~DOC_FLAG_CMDS)) shlog(SHLOG_DOC, " \n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
         if (doc_flags & DOC_FLAG_CMDS) shlog(SHLOG_DOC, CMDS_LIST);
     } else {
-        char *cmd_to_doc_name = cmd.argv.items[0];
-        CmdType type = getCmdType(cmd_to_doc_name);
+        char *cmd_to_doc_name = cmd.argv[0];
+        CmdType type = cmd_get_type(cmd_to_doc_name);
         if      (type == CMD_UNKNOWN) shlog_unknown_command(cmd_to_doc_name);
         else if (type == CMD_SL) { } // magari metto un easter anche qua
         else if (type == CMDTYPES_COUNT || type > CMDTYPES_COUNT) {
@@ -463,7 +544,9 @@ int exec_doc(Command cmd)
 
 int exec_echo(Command cmd)
 {
-    for (int i = 0; i < cmd.argc; i++) printf("%s ", cmd.argv.items[i]);
+    for (size_t i = 0; i < cmd.argc; i++) {
+        printf("%s ", cmd.argv[i]);
+    }
     printf("\n");
     return 0;
 }
@@ -489,7 +572,7 @@ int exec_ls(Command cmd)
     char path[1024];
     if (cmd.argc == 0) sprintf(path, working_dir);
     else {
-        char *path_arg = cmd.argv.items[0];
+        char *path_arg = cmd.argv[0];
         if (streq(path_arg, ".") || streq(path_arg, "./")) sprintf(path, working_dir);
         else if (path_arg[0] == '~') sprintf(path, "%s/%s", root_dir, path_arg+1);
         else sprintf(path, path_arg);
@@ -497,9 +580,9 @@ int exec_ls(Command cmd)
 
     bool ls_flag_show_hidden_files = false;
 
-    for (int i = 0; i < cmd.flagc; i++) {
-        char *flag = cmd.flagv.items[i];
-        if (streq(flag, "-h")) ls_flag_show_hidden_files = true;
+    for (size_t i = 0; i < cmd.flagc; i++) {
+        char *flag = cmd.flagv[i];
+        if (streq(flag, "h")) ls_flag_show_hidden_files = true;
         else {
             shlog_unknown_flag(flag, cmd.name);
             return 1;
@@ -563,7 +646,7 @@ int exec_cd(Command cmd)
     char new_dir[1024];
     if (cmd.argc == 0) sprintf(new_dir, root_dir);
     else {
-        char *new_dir_arg = cmd.argv.items[0];
+        char *new_dir_arg = cmd.argv[0];
         if (new_dir_arg[0] == '~') sprintf(new_dir, "%s/%s", root_dir, new_dir_arg+1);
         else sprintf(new_dir, new_dir_arg);
     }
@@ -587,8 +670,9 @@ int exec_mkdir(Command cmd)
         shlog(SHLOG_USAGE, USAGE_MKDIR);
         return 1;
     }
-    for (int i = 0; i < cmd.argc; i++)
-        mkdir(cmd.argv.items[i], 0777);
+    for (size_t i = 0; i < cmd.argc; i++) {
+        mkdir(cmd.argv[i], 0777);
+    }
     return 0;
 }
 
@@ -600,23 +684,23 @@ int exec_rm(Command cmd)
         shlog(SHLOG_USAGE, USAGE_RM);
         return 1;
     }
-    for (int i = 0; i < cmd.flagc; i++) {
-        char *flag = cmd.flagv.items[i];
-        if (streq(flag, "-r")) rm_flag_recursive = true;
+    for (size_t i = 0; i < cmd.flagc; i++) {
+        char *flag = cmd.flagv[i];
+        if (streq(flag, "r")) rm_flag_recursive = true;
         else {
             shlog_unknown_flag(flag, cmd.name);
             return 1;
         }
     }
     int err = 0;
-    for (int i = 0; i < cmd.argc; i++) {
-        if (streq(cmd.argv.items[i], "-r")) continue;
+    for (size_t i = 0; i < cmd.argc; i++) {
+        if (streq(cmd.argv[i], "r")) continue;
 
-        if (remove(cmd.argv.items[i]) != 0) {
-            if (is_dir(cmd.argv.items[i])) {
+        if (remove(cmd.argv[i]) != 0) {
+            if (is_dir(cmd.argv[i])) {
                 if (rm_flag_recursive) shlog(SHLOG_WARNING, "flag -r is not yet implemented.");
-                else shlog(SHLOG_ERROR, "Could not remove not empty directory `%s`. Consider using recursive flag -r.", cmd.argv.items[i]);
-            } else shlog(SHLOG_ERROR, "Could not remove file `%s`.", cmd.argv.items[i]);
+                else shlog(SHLOG_ERROR, "Could not remove not empty directory `%s`. Consider using recursive flag -r.", cmd.argv[i]);
+            } else shlog(SHLOG_ERROR, "Could not remove file `%s`.", cmd.argv[i]);
             err = 1;
         }
     }
@@ -670,7 +754,7 @@ int exec_size(Command cmd)
         shlog_no_flags_for_this_command(cmd.name);
         return 1;
     }
-    char *file_path = cmd.argc == 0 ? working_dir : cmd.argv.items[0];
+    char *file_path = cmd.argc == 0 ? working_dir : cmd.argv[0];
     size_t size = 0;
     bool ok = calculate_file_size(file_path, &size);
     if (!ok) {
@@ -694,7 +778,7 @@ int exec_mkfl(Command cmd)
     }
     CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
 
-    char *file_path = cmd.argv.items[0];
+    char *file_path = cmd.argv[0];
     FILE *f = fopen(file_path, "a");
     if (f == NULL) {
         shlog(SHLOG_ERROR, "Could not create file `%s`", file_path);
@@ -711,7 +795,7 @@ int exec_ashed(Command cmd)
     shlog(SHLOG_WARNING, "No longer supported");
     CHECK_TOO_MANY_ARGUMENTS(cmd, 1);
     char *filename = NULL;
-    if (cmd.argc == 1) filename = cmd.argv.items[0];
+    if (cmd.argc == 1) filename = cmd.argv[0];
     int ashed_exit_code = ashed_main(filename);
     shlog(SHLOG_TODO, "Handle ashed exit code %d", ashed_exit_code);
     return 0;
@@ -730,10 +814,8 @@ int exec_file_write(Command cmd)
         return 1;
     }
 
-    char *file_name = cmd.argv.items[0];
-    if (!does_file_exist(file_name)) {
-        shlog(SHLOG_INFO, "Creating file `%s`", file_name);
-    }
+    char *file_name = cmd.argv[0];
+    if (!does_file_exist(file_name)) shlog(SHLOG_INFO, "Creating file `%s`", file_name);
     FILE *f = cmd.type == CMD_FILE_WRITE ? fopen(file_name, "w") : fopen(file_name, "a");
     if (f == NULL) {
         shlog(SHLOG_ERROR, "Could not open file `%s`", file_name);
@@ -781,7 +863,7 @@ int exec_dump(Command cmd)
         return 1;
     }
 
-    char *fin_name = cmd.argv.items[0];
+    char *fin_name = cmd.argv[0];
     if (!does_file_exist(fin_name)) {
         shlog_file_does_not_exist(fin_name);
         return 1;
@@ -803,7 +885,7 @@ int exec_dump(Command cmd)
         fout = stdin;
         if (SHDEBUG) shlog(SHLOG_DEBUG, "Dump output: stdin");
     } else {
-        char *operator = cmd.argv.items[1];
+        char *operator = cmd.argv[1];
         if (SHDEBUG) shlog(SHLOG_DEBUG, "Operator: %s", operator);
         if (streq(operator, ">")) {
             options = "wb";
@@ -815,7 +897,7 @@ int exec_dump(Command cmd)
             return 1;
         }
 
-        char *fout_name = cmd.argv.items[2];
+        char *fout_name = cmd.argv[2];
         if (!does_file_exist(fout_name)) {
             shlog(SHLOG_INFO, "Creating file `%s`", fout_name);
         }
@@ -864,13 +946,13 @@ int exec_move(Command cmd)
     CHECK_TOO_FEW_ARGUMENTS(cmd, 2);
     CHECK_TOO_MANY_ARGUMENTS(cmd, 2);
 
-    char *old_path = cmd.argv.items[0];
+    char *old_path = cmd.argv[0];
     struct stat st;
     if (stat(old_path, &st) != 0) {
         shlog(SHLOG_ERROR, "File `%s` does not exist", old_path);
         return 1;
     }
-    char *new_path = cmd.argv.items[1];
+    char *new_path = cmd.argv[1];
     if (!is_dir(new_path)) {
         shlog(SHLOG_ERROR, "`%s` is not a directory", new_path);
         return 1;
@@ -908,13 +990,13 @@ int exec_rename(Command cmd)
     CHECK_TOO_FEW_ARGUMENTS(cmd, 2);
     CHECK_TOO_MANY_ARGUMENTS(cmd, 2);
 
-    char *old_name = cmd.argv.items[0];
+    char *old_name = cmd.argv[0];
     struct stat st;
     if (stat(old_name, &st) != 0) {
         shlog(SHLOG_ERROR, "File `%s` does not exist", old_name);
         return 1;
     }
-    char *new_name = cmd.argv.items[1];
+    char *new_name = cmd.argv[1];
     if (strchr(new_name, '/') != NULL) {
         shlog(SHLOG_ERROR, "The new name cannot contain '/' (`%s`)", new_name);
         return 1;
@@ -959,41 +1041,37 @@ int exec_external(Command cmd)
     pid_t child = fork();
     switch (child)
     {
-        case 0:
-            if (execvp(cmd.argv.items[0], cmd.argv.items) != -1) return EXIT_SUCCESS;
-            else {
-                shlog(SHLOG_ERROR, "Error executing external command");
-                return 1;
-            }
         case -1:
             if (SHDEBUG) perror("fork");
-            shlog(SHLOG_FATAL, "Could not execute external command");
+            shlog(SHLOG_FATAL, "Could not create child process");
             exit(EXIT_FAILURE);
+        case 0:
+            execvp(cmd.argv[0], cmd.argv); // TODO: aggiungere NULL alla fine, si puo' fare anche in cmd_parse
+            shlog(SHLOG_ERROR, "Error executing external command");
+            return 1;
         default:
-            int wexit;
-            struct rusage rusage;
-            pid_t wpid;
+            int wstatus;
+            struct rusage rusage; // TODO, per determinare quanto tempo ci ha impiegato?
 
             do {
-                wpid = wait4(child, &wexit, 0, &rusage);
-                if (wpid == -1) {
+                if (wait4(child, &wstatus, 0, &rusage) == -1) {
                     if (SHDEBUG) perror("waitpid");
                     shlog(SHLOG_FATAL, "Could not execute external command");
                     exit(EXIT_FAILURE);
                 }
 
-                if (WIFEXITED(wexit)) {
-                    int code = WEXITSTATUS(wexit);
+                if (WIFEXITED(wstatus)) {
+                    int code = WEXITSTATUS(wstatus);
                     if (code == EXIT_SUCCESS) shlog(SHLOG_INFO, "External command terminated with code %d", EXIT_SUCCESS);
                     else shlog(SHLOG_ERROR, "External command terminated with code %d", code);
-                } else if (WIFSIGNALED(wexit)) {
+                } else if (WIFSIGNALED(wstatus)) {
                     shlog(SHLOG_TODO, "WIFSIGNALED: not implemented");    
-                } else if (WIFSTOPPED(wexit)) {
+                } else if (WIFSTOPPED(wstatus)) {
                     shlog(SHLOG_TODO, "WIFSTOPPED: not implemented");    
-                } else if (WIFCONTINUED(wexit)) {
+                } else if (WIFCONTINUED(wstatus)) {
                     shlog(SHLOG_TODO, "WIFCONTINUED: not implemented");    
                 }
-            } while (!WIFEXITED(wexit) && !WIFSIGNALED(wexit));
+            } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
     }
     return 0;
 }
@@ -1007,8 +1085,8 @@ int main(void)
     int len = 0;
     int read;
     int cmd_n = 0;
-    bool isCommandValid;
-    Command command = {0};
+    bool is_cmd_valid;
+    Command cmd = {0};
     while (exit_code == EXIT_NOT_SET)
     {
         print_prompt();
@@ -1018,11 +1096,8 @@ int main(void)
             break;
         } else if (read <= 0) {
             if (SHDEBUG) shlog(SHLOG_DEBUG, "What's the matter? %s", strerror(errno));
-            if (signalno != 0) {
-                exit_code = EXIT_SIGNAL;
-            } else {
-                exit_code = EXIT_READ_ERROR;
-            }
+            if (signalno != 0) exit_code = EXIT_SIGNAL;
+            else exit_code = EXIT_READ_ERROR;
             break;
         }
         len = strlen(line) - 1;
@@ -1030,44 +1105,39 @@ int main(void)
         line[len] = '\0';
         cmd_n++;
         if (SHDEBUG) shlog(SHLOG_DEBUG, "%d (%u): '%s'", cmd_n, len, line);
-        ArrayOfStrings words = {0};
-        int word_count = count_words(line);
-        aos_init(&words, word_count);
-        tokenize_string(line, &words);
+        is_cmd_valid = cmd_parse(&cmd, line);
         free(line);
         line = NULL;
-        Command command;
-        isCommandValid = words_to_command(words, &command);
-        aos_free(&words);
-        if (isCommandValid) {
-            if (SHDEBUG) cmd_print(command);
-            switch (command.type)
-            {
-                case CMD_DOC:         exec_doc(command);         break;
-                case CMD_ECHO:        exec_echo(command);         break;
-                case CMD_LS:          exec_ls(command);          break;
-                case CMD_CD:          exec_cd(command);          break;
-                case CMD_PWD:         exec_pwd();                 break;
-                case CMD_MKDIR:       exec_mkdir(command);       break;
-                case CMD_RM:          exec_rm(command);          break;
-                case CMD_QUIT:        exec_quit();                break;
-                case CMD_CLEAR:       exec_clear();               break;
-                case CMD_SL:          exec_sl();                  break;
-                case CMD_SIZE:        exec_size(command);        break;
-                case CMD_MKFL:        exec_mkfl(command);        break;
-                case CMD_ASHED:        exec_ashed(command);      break;
-                case CMD_FILE_WRITE:  exec_file_write(command);  break;
-                case CMD_FILE_APPEND: exec_file_write(command);  break;
-                case CMD_DUMP:        exec_dump(command);        break;
-                case CMD_MOVE:        exec_move(command);        break;
-                case CMD_RENAME:      exec_rename(command);      break;
-                case CMD_EXTERNAL:    exec_external(command);    break;
-                case CMDTYPES_COUNT: shlog(SHLOG_WARNING, "`%s` command is not implemented yet.", command.name); break;
-                case CMD_UNKNOWN:
-                default: shlog(SHLOG_FATAL, "Unreachable"); abort();
-            }
-            cmd_free(&command);
+        if (!is_cmd_valid) {
+            continue;
         }
+        if (SHDEBUG) cmd_print(cmd);
+        switch (cmd.type)
+        {
+            case CMD_DOC:         exec_doc(cmd);        break;
+            case CMD_ECHO:        exec_echo(cmd);       break;
+            case CMD_LS:          exec_ls(cmd);         break;
+            case CMD_CD:          exec_cd(cmd);         break;
+            case CMD_PWD:         exec_pwd();           break;
+            case CMD_MKDIR:       exec_mkdir(cmd);      break;
+            case CMD_RM:          exec_rm(cmd);         break;
+            case CMD_QUIT:        exec_quit();          break;
+            case CMD_CLEAR:       exec_clear();         break;
+            case CMD_SL:          exec_sl();            break;
+            case CMD_SIZE:        exec_size(cmd);       break;
+            case CMD_MKFL:        exec_mkfl(cmd);       break;
+            case CMD_ASHED:       exec_ashed(cmd);      break;
+            case CMD_FILE_WRITE:  exec_file_write(cmd); break;
+            case CMD_FILE_APPEND: exec_file_write(cmd); break;
+            case CMD_DUMP:        exec_dump(cmd);       break;
+            case CMD_MOVE:        exec_move(cmd);       break;
+            case CMD_RENAME:      exec_rename(cmd);     break;
+            case CMD_EXTERNAL:    exec_external(cmd);   break;
+            case CMDTYPES_COUNT: shlog(SHLOG_WARNING, "`%s` command is not implemented yet.", cmd.name); break;
+            case CMD_UNKNOWN:
+            default: shlog(SHLOG_FATAL, "Unreachable"); abort();
+        }
+        cmd_free(&cmd);
     }
 
     if (exit_code == EXIT_OK) {
@@ -1085,6 +1155,5 @@ int main(void)
         }
         shlog(SHLOG_ERROR, "Shell exited abnormally with code %d", exit_code);
     }
-    if (isCommandValid) cmd_free(&command);
     return 0;
 }
